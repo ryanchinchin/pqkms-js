@@ -1,0 +1,30 @@
+{
+  "name": "@securesubstrates/pqkms",
+  "version": "0.0.1",
+  "description": "pqkms front-end libraries",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/securesubstrates/pqkms.git"
+  },
+  "author": "Secure Substrates Team",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/securesubstrates/pqkms/issues"
+  },
+  "homepage": "https://github.com/securesubstrates/pqkms#readme",
+  "devDependencies": {
+    "npx": "^10.2.2",
+    "tslib": "^2.6.0",
+    "typescript": "^5.2.2",
+    "@types/node": "^20.6.2",
+    "micro-should": "^0.4.0"
+  },
+  "dependencies": {
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts"
+}
