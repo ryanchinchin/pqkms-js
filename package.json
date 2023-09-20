@@ -8,14 +8,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/securesubstrates/pqkms.git"
+    "url": "git+ssh://github.com:ryanchinchin/pqkms-js.git"
   },
   "author": "Secure Substrates Team",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/securesubstrates/pqkms/issues"
+    "url": "https://github.com/ryanchinchin/pqkms-js/issues"
   },
-  "homepage": "https://github.com/securesubstrates/pqkms#readme",
+  "homepage": "https://github.com/ryanchinchin/pqkms-js#readme",
   "devDependencies": {
     "@types/node": "^20.6.2",
     "micro-should": "^0.4.0",
