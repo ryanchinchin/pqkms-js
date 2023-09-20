@@ -3,7 +3,6 @@
   "display": "Node 18",
 
   "compilerOptions": {
-    "lib": [ "DOM"],
     "module": "ESNext",
     "target": "ESNext",
     "moduleResolution": "Bundler",
@@ -21,6 +20,9 @@
     "isolatedModules": true
   },
 
-  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.d.ts"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "files": [
+    "src/index.ts",
+    "src/enclave_signer.ts",
+    "src/index.dom.ts"
+  ]
 }

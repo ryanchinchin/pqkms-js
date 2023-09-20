@@ -12,7 +12,7 @@
                 "<node_internals>/**"
             ],
             "program": "/Users/swami/Developer/JS/sys/node/bin/npx",
-            "args": ["tsx", "${workspaceFolder}/src/enclave_signer.ts"]
+            "args": ["tsx", "${workspaceFolder}/src/index.ts"]
         }
     ]
 }

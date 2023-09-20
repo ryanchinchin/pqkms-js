@@ -17,14 +17,13 @@
   },
   "homepage": "https://github.com/securesubstrates/pqkms#readme",
   "devDependencies": {
+    "@types/node": "^20.6.2",
+    "micro-should": "^0.4.0",
     "npx": "^10.2.2",
     "tslib": "^2.6.0",
-    "typescript": "^5.2.2",
-    "@types/node": "^20.6.2",
-    "micro-should": "^0.4.0"
+    "typescript": "^5.2.2"
   },
-  "dependencies": {
-  },
+  "types": "lib/index.d.ts",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts"
+  "browser": "lib/index.dom.js"
 }

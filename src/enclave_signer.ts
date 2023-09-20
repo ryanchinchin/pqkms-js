@@ -160,47 +160,20 @@ interface ClientRequestForRegistration {
 }
 
 export class EnclaveSigner {
-  public crypto: SubtleCrypto;
-  public static CRYPTO = null;
+  static CRYPTO = globalThis.crypto;
 
   constructor() {
-    if (!EnclaveSigner.CRYPTO) {
-      if (
-        typeof window !== "undefined" &&
-        window.crypto &&
-        window.crypto.subtle
-      ) {
-        EnclaveSigner.CRYPTO = window.crypto;
-      } else if (
-        typeof globalThis !== "undefined" &&
-        globalThis.crypto &&
-        globalThis.crypto.subtle
-      ) {
-        EnclaveSigner.CRYPTO = globalThis.crypto;
-      } else {
-        import("crypto")
-          .then((webcrypto) => {
-            EnclaveSigner.CRYPTO = webcrypto;
-          })
-          .catch((e) => console.log("Failed to load crypto module"));
-      }
-    }
-
-    if (EnclaveSigner.CRYPTO) {
-      this.crypto = EnclaveSigner.CRYPTO.subtle;
-    }
-  }
-
-  uuid(): string {
-    if (EnclaveSigner.CRYPTO) {
-      return EnclaveSigner.CRYPTO.randomUUID();
-    } else {
-      throw Error("Crypto Module not available");
+    if (!globalThis.crypto || !globalThis.crypto.subtle) {
+      throw Error("This environment doesn't support WebCrypto interface");
     }
   }
 
   static hsm(): SubtleCrypto {
     return EnclaveSigner.CRYPTO.subtle;
+  }
+
+  uuid(): string {
+    return EnclaveSigner.CRYPTO.randomUUID();
   }
 
   async sgx_rsa_key(): Promise<CryptoKeyPair> {
@@ -214,7 +187,7 @@ export class EnclaveSigner {
       hash: "SHA-256",
     };
     const start_time = performance.now();
-    const key = await this.crypto.generateKey(params, false, usage);
+    const key = await EnclaveSigner.hsm().generateKey(params, false, usage);
     const end_time = performance.now();
     console.log("Time taken to generate RSA key: ", end_time - start_time);
     return key;
@@ -414,7 +387,7 @@ export default class UserRegistrationManager {
   }
 }
 
-const main = async () => {
+export async function main() {
   let reg = new UserRegistrationManager();
   const crypto = new EnclaveSigner();
   const enclaveKey = await crypto.sgx_rsa_key();
@@ -426,15 +399,4 @@ const main = async () => {
 
   const registerUser = await reg.registerUser(user);
   console.log(`Registration `, registerUser ? "Successful" : "Failed");
-};
-
-if (typeof window !== "undefined") {
-  main();
-} else {
-  const crypto = new EnclaveSigner();
-  const userManager = new UserRegistrationManager();
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  setImmediate(async () => {
-    await main();
-  });
 }
