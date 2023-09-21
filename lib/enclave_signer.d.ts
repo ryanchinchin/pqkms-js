@@ -37,6 +37,7 @@ interface SigStructClientSigned {
 interface UserInfo {
     domain_name: string;
     email_addr: string;
+    hashed_pass: Uint8Array;
     enclave_key?: CryptoKeyPair;
 }
 interface ClientRequestForRegistration {
@@ -62,12 +63,16 @@ export default class UserRegistrationManager {
     readonly discoveryURL: string;
     readonly baseURL: string;
     urlDirectory: URLDirectory;
-    constructor(directoryUrl?: string);
+    constructor(directoryUrl: string);
     parseServerResponse(response: Response): Promise<any>;
     fetchDirectory(): Promise<URLDirectory>;
     fetchEnclaveList(): Promise<ListModulesServerResponse>;
     signEnclaves(userInfo: UserInfo, modulesReq: ListModulesServerResponse): Promise<ClientRequestForRegistration>;
     registerUser(user_info: UserInfo): Promise<boolean>;
 }
-export declare function main(): Promise<void>;
+export declare function validate_domain_str(domain: string): void;
+export declare function validate_raw_password_str(password: string): void;
+export declare function validate_username_str(user_email: string): void;
+export declare function pwhash(domain: string, username: string, passwd: string): Promise<Uint8Array>;
+export declare function main(domain: string, email_addr: string, password: string, base_url: string, crypto_key?: CryptoKeyPair): Promise<void>;
 export {};

@@ -1,3 +1,14 @@
+import * as argon2 from "argon2-wasm-esm";
+
+// This is based on OWASP recommendataion from
+// https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+const argon_config = {
+  time: 2, // the number of iterations: 2
+  mem: 19456, // used memory, in KiB: 19MiB
+  parallelism: 1, // desired parallelism
+  type: argon2.ArgonType.Argon2di, // or argon2.ArgonType.Argon2i
+};
+
 const isUND = (val: any): boolean => {
   return typeof val === "undefined";
 };
@@ -149,6 +160,7 @@ interface SigStructClientSigned {
 interface UserInfo {
   domain_name: string;
   email_addr: string;
+  hashed_pass: Uint8Array;
   enclave_key?: CryptoKeyPair;
 }
 
@@ -238,7 +250,7 @@ export default class UserRegistrationManager {
   readonly baseURL: string;
   urlDirectory: URLDirectory = null;
 
-  constructor(directoryUrl: string = "https://Euler.local:8443/") {
+  constructor(directoryUrl: string) {
     this.discoveryURL = directoryUrl;
     const url = new URL(this.discoveryURL);
     this.baseURL = url.origin;
@@ -253,7 +265,7 @@ export default class UserRegistrationManager {
     if (response.ok) {
       const resp: PQKMSResponse = await response.json();
 
-      if (resp.code === 200) {
+      if (resp.code >= 200 && resp.code < 300) {
         return resp.message;
       } else {
         throw new Error(
@@ -275,11 +287,11 @@ export default class UserRegistrationManager {
       const response = await fetch(this.discoveryURL, {
         mode: "cors",
       });
+      console.log(`Server fetch returned code: ${response.status}`);
 
-      if (response.status === 200) {
+      if (response.status >= 200 && response.status < 300) {
         this.urlDirectory = await response.json();
       } else {
-        console.log(`Server returned non-200 response!`);
         this.urlDirectory = {
           enclave_list: "/v0/admin/enclaves",
           register_domain: "/v0/admin/register_domain",
@@ -299,7 +311,7 @@ export default class UserRegistrationManager {
   async fetchEnclaveList(): Promise<ListModulesServerResponse> {
     let directory = await this.fetchDirectory();
     const fetchUrl = `${this.baseURL}${directory.enclave_list}`;
-    console.log(`Attempting to fetch list of enclaves!`);
+    console.log(`Attempting to fetch the list of enclaves from ${fetchUrl}!`);
     const response = await fetch(fetchUrl, {
       mode: "cors",
     });
@@ -322,6 +334,7 @@ export default class UserRegistrationManager {
       user_info: {
         domain_name: userInfo.domain_name,
         email_addr: userInfo.email_addr,
+        hashed_pass: userInfo.hashed_pass,
       },
       server_nonce: null,
       signer_modulus: toHexString(modulus),
@@ -387,14 +400,61 @@ export default class UserRegistrationManager {
   }
 }
 
-export async function main() {
-  let reg = new UserRegistrationManager();
-  const crypto = new EnclaveSigner();
-  const enclaveKey = await crypto.sgx_rsa_key();
+export function validate_domain_str(domain: string) {
+  const regex = /^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]$/g;
+  const found = domain.match(regex);
+  if (!found) {
+    throw new ValidationError(
+      "Invalid domain prefix. Must be a valid domain component"
+    );
+  }
+}
+
+export function validate_raw_password_str(password: string) {
+  if (password.length < 8) {
+    throw new ValidationError(
+      "Invalid password. Must be at least 8 characters"
+    );
+  }
+}
+
+export function validate_username_str(user_email: string) {}
+
+export async function pwhash(
+  domain: string,
+  username: string,
+  passwd: string
+): Promise<Uint8Array> {
+  const salt_pt = passwd + domain + username + passwd;
+  const argon_salt = new TextEncoder().encode(salt_pt);
+  const salt = await EnclaveSigner.hsm().digest("SHA-256", argon_salt);
+  const argon_hash = await argon2.hash({
+    pass: passwd,
+    salt,
+    ...argon_config,
+  });
+  return argon_hash.hash;
+}
+
+export async function main(
+  domain: string,
+  email_addr: string,
+  password: string,
+  base_url: string,
+  crypto_key?: CryptoKeyPair
+) {
+  validate_domain_str(domain);
+  validate_raw_password_str(password);
+  validate_username_str(email_addr);
+
+  let reg = new UserRegistrationManager(base_url);
+  const enclaveKey = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
+  let hashed_pw = await pwhash(domain, email_addr, password);
   let user: UserInfo = {
-    domain_name: "hakuna",
-    email_addr: "hakuna@matata.com",
+    domain_name: domain,
+    email_addr: email_addr,
     enclave_key: enclaveKey,
+    hashed_pass: hashed_pw,
   };
 
   const registerUser = await reg.registerUser(user);

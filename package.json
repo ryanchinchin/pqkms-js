@@ -25,5 +25,8 @@
   },
   "types": "lib/index.d.ts",
   "main": "lib/index.js",
-  "browser": "lib/index.dom.js"
+  "browser": "lib/index.dom.js",
+  "dependencies": {
+    "argon2-wasm-esm": "^1.0.3"
+  }
 }
