@@ -176,7 +176,9 @@ export class EnclaveSigner {
 
   constructor() {
     if (!globalThis.crypto || !globalThis.crypto.subtle) {
-      throw Error("This environment doesn't support WebCrypto interface");
+      throw Error(
+        "Either this connection is not secure or the browser doesn't support WebCrypto"
+      );
     }
   }
 
@@ -427,7 +429,10 @@ export async function pwhash(
 ): Promise<Uint8Array> {
   const salt_pt = passwd + domain + username + passwd;
   const argon_salt = new TextEncoder().encode(salt_pt);
-  const salt = await EnclaveSigner.hsm().digest("SHA-256", argon_salt);
+  const salt = new Uint8Array(
+    await EnclaveSigner.hsm().digest("SHA-256", argon_salt)
+  );
+
   const argon_hash = await argon2.hash({
     pass: passwd,
     salt,
