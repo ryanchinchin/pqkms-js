@@ -1,9 +1,6 @@
 import * as argon2 from "argon2-wasm-esm";
-import { OprfClient, OprfClientInitData, OprfError } from "./oprf";
+import { OprfClient, OprfClientInitData, OprfError } from "./oprf.js";
 import { p384, hashToCurve } from "@noble/curves/p384";
-import { UserInfo, userInfo } from "os";
-import { Url } from "url";
-import { sign } from "crypto";
 
 // This is based on OWASP recommendataion from
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
