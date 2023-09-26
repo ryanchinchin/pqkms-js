@@ -1,4 +1,4 @@
-import { OprfClient, OprfClientInitData } from "./oprf";
+import { OprfClient, OprfClientInitData } from "./oprf.js";
 type endian_t = "big" | "little";
 interface ActivityCallback<T> {
     start(): any;
