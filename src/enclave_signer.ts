@@ -1,4 +1,9 @@
 import * as argon2 from "argon2-wasm-esm";
+import { OprfClient, OprfClientInitData, OprfError } from "./oprf";
+import { p384, hashToCurve } from "@noble/curves/p384";
+import { UserInfo, userInfo } from "os";
+import { Url } from "url";
+import { sign } from "crypto";
 
 // This is based on OWASP recommendataion from
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
@@ -19,6 +24,20 @@ function assert(val: boolean) {
   if (!val) {
     throw EvalError("Assertion failed");
   }
+}
+
+interface ActivityCallback<T> {
+  start();
+  end(is_success: boolean);
+}
+
+interface RegistrationProgressCallback {
+  fetchDirectory: ActivityCallback<void> | null;
+  keygen: ActivityCallback<CryptoKeyPair> | null;
+  sign: ActivityCallback<[SigStructTbsInfo]> | null;
+  oprf: ActivityCallback<OprfClientInitData> | null;
+  registrationInit: ActivityCallback<void> | null;
+  registrationFinal: ActivityCallback<void> | null;
 }
 
 function eqArray(arr1: ArrayBuffer, arr2: ArrayBuffer): boolean {
@@ -157,15 +176,15 @@ interface SigStructClientSigned {
   config: EnclaveConfig;
 }
 
-interface UserInfo {
+interface RegistrationReqInitMsg {
   domain_name: string;
   email_addr: string;
-  hashed_pass: Uint8Array;
+  oprf_client_data: string;
   enclave_key?: CryptoKeyPair;
 }
 
 interface ClientRequestForRegistration {
-  user_info: UserInfo;
+  user_info: RegistrationReqInitMsg | null;
   server_nonce: string;
   signer_modulus: string;
   signed_enclaves: SigStructClientSigned[];
@@ -250,12 +269,42 @@ interface PQKMSResponse {
 export default class UserRegistrationManager {
   readonly discoveryURL: string;
   readonly baseURL: string;
+  readonly oprfClient: OprfClient;
+  private oprfClientData: OprfClientInitData | null = null;
   urlDirectory: URLDirectory = null;
 
   constructor(directoryUrl: string) {
     this.discoveryURL = directoryUrl;
     const url = new URL(this.discoveryURL);
     this.baseURL = url.origin;
+    this.oprfClient = new OprfClient(p384, hashToCurve);
+  }
+
+  async computeOprfClientData(
+    raw_pw: string,
+    user_info: RegistrationReqInitMsg
+  ): Promise<OprfClientInitData> {
+    for (let i = 0; i < 5; i++) {
+      let argon_hash = await pwhash(
+        user_info.domain_name,
+        user_info.email_addr,
+        raw_pw,
+        i
+      );
+
+      try {
+        this.oprfClientData = this.oprfClient.blind(argon_hash);
+        return this.oprfClientData;
+      } catch (e) {
+        if (e instanceof OprfError) {
+          if (e.err() == "HashedToInifinity") {
+            continue;
+          }
+        }
+        throw e;
+      }
+    }
+    throw new Error("Unusable password!");
   }
 
   async parseServerResponse(response: Response): Promise<any> {
@@ -323,21 +372,17 @@ export default class UserRegistrationManager {
   }
 
   async signEnclaves(
-    userInfo: UserInfo,
+    enclaveSigningKey: CryptoKeyPair,
     modulesReq: ListModulesServerResponse
   ): Promise<ClientRequestForRegistration> {
     const enclaveSigner = new EnclaveSigner();
-    let { privateKey, publicKey } = userInfo.enclave_key;
+    let { privateKey, publicKey } = enclaveSigningKey;
 
     assert(privateKey.type === "private");
     let modulus = await extractModulus(publicKey, "big");
 
     let result: ClientRequestForRegistration = {
-      user_info: {
-        domain_name: userInfo.domain_name,
-        email_addr: userInfo.email_addr,
-        hashed_pass: userInfo.hashed_pass,
-      },
+      user_info: null,
       server_nonce: null,
       signer_modulus: toHexString(modulus),
       signed_enclaves: [],
@@ -371,15 +416,30 @@ export default class UserRegistrationManager {
     return result;
   }
 
-  async registerUser(user_info: UserInfo) {
-    let enclaves = await this.fetchEnclaveList();
-    let signed = await this.signEnclaves(user_info, enclaves);
+  async registerUser(
+    raw_pw: string,
+    user_info: RegistrationReqInitMsg,
+    progress?: RegistrationProgressCallback
+  ) {
+    console.log(`Fetching enclave directory`);
     let directory = await this.fetchDirectory();
-    let register_url = `${this.baseURL}${directory.register_domain}`;
-    console.log(`Attempting to register user at URL ${register_url}`);
 
+    console.log(`Fetching list of enclaves`);
+    let enclaves = await this.fetchEnclaveList();
+
+    console.log(`Signing enclaves`);
+    let signed = await this.signEnclaves(user_info.enclave_key, enclaves);
+
+    console.log(`Computing OPRF Client Data`);
+    await this.computeOprfClientData(raw_pw, user_info);
+
+    user_info.oprf_client_data = this.oprfClientData.clientRequestBytes;
+
+    signed.user_info = user_info;
     signed.server_nonce = enclaves.resp_challenge;
 
+    console.log(`Attempting stage-1 of registration`);
+    let register_url = `${this.baseURL}${directory.register_domain}`;
     try {
       let registerResult = await fetch(register_url, {
         method: "POST",
@@ -425,9 +485,17 @@ export function validate_username_str(user_email: string) {}
 export async function pwhash(
   domain: string,
   username: string,
-  passwd: string
+  passwd: string,
+  repeat?: number // Used to avoid hashing to point at infinity
 ): Promise<Uint8Array> {
-  const salt_pt = passwd + domain + username + passwd;
+  let salt_pt = passwd + domain + username + passwd;
+
+  if (repeat != null) {
+    for (let j = 0; j < repeat; j++) {
+      salt_pt = `${passwd}${salt_pt}${passwd}`;
+    }
+  }
+
   const argon_salt = new TextEncoder().encode(salt_pt);
   const salt = new Uint8Array(
     await EnclaveSigner.hsm().digest("SHA-256", argon_salt)
@@ -441,7 +509,7 @@ export async function pwhash(
   return argon_hash.hash;
 }
 
-export async function main(
+export async function register_user(
   domain: string,
   email_addr: string,
   password: string,
@@ -454,14 +522,13 @@ export async function main(
 
   let reg = new UserRegistrationManager(base_url);
   const enclaveKey = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
-  let hashed_pw = await pwhash(domain, email_addr, password);
-  let user: UserInfo = {
+  let user: RegistrationReqInitMsg = {
     domain_name: domain,
     email_addr: email_addr,
     enclave_key: enclaveKey,
-    hashed_pass: hashed_pw,
+    oprf_client_data: null,
   };
 
-  const registerUser = await reg.registerUser(user);
+  const registerUser = await reg.registerUser(password, user);
   console.log(`Registration `, registerUser ? "Successful" : "Failed");
 }
