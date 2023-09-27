@@ -1,6 +1,6 @@
 {
   "name": "@securesubstrates/pqkms",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "pqkms front-end libraries",
   "type": "module",
   "scripts": {

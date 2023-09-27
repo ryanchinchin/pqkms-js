@@ -51,7 +51,6 @@ interface RegistrationReqInitMsg {
     domain_name: string;
     email_addr: string;
     oprf_client_data: string;
-    mrsigner_pub?: CryptoKey;
 }
 interface ClientRequestForRegistration {
     user_info: RegistrationReqInitMsg | null;
@@ -84,7 +83,7 @@ export default class UserRegistrationManager {
     fetchDirectory(): Promise<URLDirectory>;
     fetchEnclaveList(): Promise<ListModulesServerResponse>;
     signEnclaves(privateKey: CryptoKey, publicKey: CryptoKey, modulesReq: ListModulesServerResponse): Promise<ClientRequestForRegistration>;
-    registerUser(raw_pw: string, user_info: RegistrationReqInitMsg, signing_priv: CryptoKey, progress?: RegistrationProgressCallback): Promise<boolean>;
+    registerUser(raw_pw: string, user_info: RegistrationReqInitMsg, signing_key: CryptoKeyPair, progress?: RegistrationProgressCallback): Promise<boolean>;
 }
 export declare function validate_domain_str(domain: string): void;
 export declare function validate_raw_password_str(password: string): void;

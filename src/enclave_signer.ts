@@ -177,7 +177,6 @@ interface RegistrationReqInitMsg {
   domain_name: string;
   email_addr: string;
   oprf_client_data: string;
-  mrsigner_pub?: CryptoKey;
 }
 
 interface ClientRequestForRegistration {
@@ -417,11 +416,13 @@ export default class UserRegistrationManager {
   async registerUser(
     raw_pw: string,
     user_info: RegistrationReqInitMsg,
-    signing_priv: CryptoKey,
+    signing_key: CryptoKeyPair,
     progress?: RegistrationProgressCallback
   ) {
+    const { privateKey: signing_priv, publicKey: mrsigner_pub } = signing_key;
+
     assert(signing_priv.type === "private");
-    assert(user_info.mrsigner_pub.type === "public");
+    assert(mrsigner_pub.type === "public");
 
     console.log(`Fetching enclave directory`);
     let directory = await this.fetchDirectory();
@@ -430,11 +431,7 @@ export default class UserRegistrationManager {
     let enclaves = await this.fetchEnclaveList();
 
     console.log(`Signing enclaves`);
-    let signed = await this.signEnclaves(
-      signing_priv,
-      user_info.mrsigner_pub,
-      enclaves
-    );
+    let signed = await this.signEnclaves(signing_priv, mrsigner_pub, enclaves);
 
     console.log(`Computing OPRF Client Data`);
     await this.computeOprfClientData(raw_pw, user_info);
@@ -446,6 +443,7 @@ export default class UserRegistrationManager {
 
     console.log(`Attempting stage-1 of registration`);
     let register_url = `${this.baseURL}${directory.register_domain}`;
+
     try {
       let registerResult = await fetch(register_url, {
         method: "POST",
@@ -527,16 +525,14 @@ export async function register_user(
   validate_username_str(email_addr);
 
   let reg = new UserRegistrationManager(base_url);
-  const { privateKey, publicKey } =
-    crypto_key || (await new EnclaveSigner().sgx_rsa_key());
+  const key_pair = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
 
   let user: RegistrationReqInitMsg = {
     domain_name: domain,
     email_addr: email_addr,
-    mrsigner_pub: publicKey,
     oprf_client_data: null,
   };
 
-  const registerUser = await reg.registerUser(password, user, privateKey);
+  const registerUser = await reg.registerUser(password, user, key_pair);
   console.log(`Registration `, registerUser ? "Successful" : "Failed");
 }
