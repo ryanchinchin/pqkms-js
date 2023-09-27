@@ -177,7 +177,7 @@ interface RegistrationReqInitMsg {
   domain_name: string;
   email_addr: string;
   oprf_client_data: string;
-  enclave_key?: CryptoKeyPair;
+  mrsigner_pub?: CryptoKey;
 }
 
 interface ClientRequestForRegistration {
@@ -369,13 +369,14 @@ export default class UserRegistrationManager {
   }
 
   async signEnclaves(
-    enclaveSigningKey: CryptoKeyPair,
+    privateKey: CryptoKey,
+    publicKey: CryptoKey,
     modulesReq: ListModulesServerResponse
   ): Promise<ClientRequestForRegistration> {
     const enclaveSigner = new EnclaveSigner();
-    let { privateKey, publicKey } = enclaveSigningKey;
 
     assert(privateKey.type === "private");
+    assert(publicKey.type === "public");
     let modulus = await extractModulus(publicKey, "big");
 
     let result: ClientRequestForRegistration = {
@@ -416,8 +417,12 @@ export default class UserRegistrationManager {
   async registerUser(
     raw_pw: string,
     user_info: RegistrationReqInitMsg,
+    signing_priv: CryptoKey,
     progress?: RegistrationProgressCallback
   ) {
+    assert(signing_priv.type === "private");
+    assert(user_info.mrsigner_pub.type === "public");
+
     console.log(`Fetching enclave directory`);
     let directory = await this.fetchDirectory();
 
@@ -425,7 +430,11 @@ export default class UserRegistrationManager {
     let enclaves = await this.fetchEnclaveList();
 
     console.log(`Signing enclaves`);
-    let signed = await this.signEnclaves(user_info.enclave_key, enclaves);
+    let signed = await this.signEnclaves(
+      signing_priv,
+      user_info.mrsigner_pub,
+      enclaves
+    );
 
     console.log(`Computing OPRF Client Data`);
     await this.computeOprfClientData(raw_pw, user_info);
@@ -518,14 +527,16 @@ export async function register_user(
   validate_username_str(email_addr);
 
   let reg = new UserRegistrationManager(base_url);
-  const enclaveKey = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
+  const { privateKey, publicKey } =
+    crypto_key || (await new EnclaveSigner().sgx_rsa_key());
+
   let user: RegistrationReqInitMsg = {
     domain_name: domain,
     email_addr: email_addr,
-    enclave_key: enclaveKey,
+    mrsigner_pub: publicKey,
     oprf_client_data: null,
   };
 
-  const registerUser = await reg.registerUser(password, user);
+  const registerUser = await reg.registerUser(password, user, privateKey);
   console.log(`Registration `, registerUser ? "Successful" : "Failed");
 }
