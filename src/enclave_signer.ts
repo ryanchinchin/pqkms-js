@@ -1,6 +1,7 @@
 import * as argon2 from "argon2-wasm-esm";
 import { OprfClient, OprfClientInitData, OprfError } from "./oprf.js";
 import { p384, hashToCurve } from "@noble/curves/p384";
+import { utf8ToBytes, concatBytes } from "@noble/curves/abstract/utils";
 
 // This is based on OWASP recommendataion from
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
@@ -26,15 +27,6 @@ function assert(val: boolean) {
 interface ActivityCallback<T> {
   start();
   end(is_success: boolean);
-}
-
-interface RegistrationProgressCallback {
-  fetchDirectory: ActivityCallback<void> | null;
-  keygen: ActivityCallback<CryptoKeyPair> | null;
-  sign: ActivityCallback<[SigStructTbsInfo]> | null;
-  oprf: ActivityCallback<OprfClientInitData> | null;
-  registrationInit: ActivityCallback<void> | null;
-  registrationFinal: ActivityCallback<void> | null;
 }
 
 function eqArray(arr1: ArrayBuffer, arr2: ArrayBuffer): boolean {
@@ -79,6 +71,14 @@ export const toHexString = (bytes: ArrayBuffer) =>
     (str, byte) => str + byte.toString(16).padStart(2, "0"),
     ""
   );
+
+export const b64urlEncode = function (buffer: ArrayBuffer) {
+  let ab = new Uint8Array(buffer);
+  return btoa(Array.from(ab, (b) => String.fromCharCode(b)).join(""))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+};
 
 export const b64urlDecode = function (
   b64encoded_data: string,
@@ -173,17 +173,45 @@ interface SigStructClientSigned {
   config: EnclaveConfig;
 }
 
-interface RegistrationReqInitMsg {
+interface UserRegistrationInfo {
   domain_name: string;
   email_addr: string;
-  oprf_client_data: string;
+  auth_algo: string;
+  auth_data: string;
 }
 
-interface ClientRequestForRegistration {
-  user_info: RegistrationReqInitMsg | null;
+interface ClientRegInit {
+  user_info: UserRegistrationInfo | null;
   server_nonce: string;
   signer_modulus: string;
   signed_enclaves: SigStructClientSigned[];
+}
+
+interface RegInitResp {
+  server_nonce: string;
+  aead_data: string;
+  user_info: UserRegistrationInfo;
+}
+
+interface ClientRegFinish {
+  // Server nonce echoed back
+  server_nonce: string;
+
+  /// AEAD data echoed back
+  aead_data: string;
+
+  /// User's ECDSA public-key as a SEC-1 encoded hex string
+  user_pub: string;
+
+  /// PSS RSA Signature over `domain || user_name || user_pub` using
+  /// mrsigner enclave signing key
+  user_pub_sig: string;
+
+  /// ECDSA signature on user_pub_sig as a proof-of-possession signature
+  oprf_pop_sig: string;
+
+  /// Client AEAD Data
+  aux_data: string;
 }
 
 export class EnclaveSigner {
@@ -207,18 +235,15 @@ export class EnclaveSigner {
 
   async sgx_rsa_key(): Promise<CryptoKeyPair> {
     const publicExponent = new Uint8Array([0x03]);
-    let usage: KeyUsage[] = ["sign", "verify"];
+    const usage: KeyUsage[] = ["sign", "verify"];
 
-    let params: RsaHashedKeyGenParams = {
+    const params: RsaHashedKeyGenParams = {
       name: "RSASSA-PKCS1-v1_5",
       modulusLength: 3072,
       publicExponent,
       hash: "SHA-256",
     };
-    const start_time = performance.now();
-    const key = await EnclaveSigner.hsm().generateKey(params, false, usage);
-    const end_time = performance.now();
-    console.log("Time taken to generate RSA key: ", end_time - start_time);
+    const key = await EnclaveSigner.hsm().generateKey(params, true, usage);
     return key;
   }
 
@@ -252,14 +277,27 @@ export class EnclaveSigner {
   }
 }
 
-interface URLDirectory {
-  enclave_list: string;
-  register_domain: string;
+interface URLVersionedDirectory {
+  v0: URLDirectory;
 }
 
-interface PQKMSResponse {
+interface URLDirectory {
+  attestation: string;
+  registration_init: string;
+  enclave_list: string;
+  registration_finish: string;
+}
+
+const default_v0_url_directory: URLDirectory = {
+  attestation: "/v0/admin/attestation",
+  registration_init: "/v0/admin/reg_init",
+  enclave_list: "/v0/admin/enclaves",
+  registration_finish: "/v0/admin/reg_finish",
+};
+
+interface PQKMSResponse<T> {
   code: number;
-  message: any;
+  message: T;
 }
 
 export default class UserRegistrationManager {
@@ -278,7 +316,7 @@ export default class UserRegistrationManager {
 
   async computeOprfClientData(
     raw_pw: string,
-    user_info: RegistrationReqInitMsg
+    user_info: UserRegistrationInfo
   ): Promise<OprfClientInitData> {
     for (let i = 0; i < 5; i++) {
       let argon_hash = await pwhash(
@@ -303,14 +341,14 @@ export default class UserRegistrationManager {
     throw new Error("Unusable password!");
   }
 
-  async parseServerResponse(response: Response): Promise<any> {
+  async parseServerResponse<T>(response: Response): Promise<T> {
     // let hdrs = new Map(response.headers);
-    console.log(
-      `Server returned response code: ${response.status} ${response.statusText} with headers:\n ${response.headers}`
-    );
+    // console.log(
+    //   `Server returned response code: ${response.status} ${response.statusText} with headers:\n ${response.headers}`
+    // );
 
     if (response.ok) {
-      const resp: PQKMSResponse = await response.json();
+      const resp: PQKMSResponse<T> = await response.json();
 
       if (resp.code >= 200 && resp.code < 300) {
         return resp.message;
@@ -320,7 +358,7 @@ export default class UserRegistrationManager {
         );
       }
     } else {
-      const err_resp: PQKMSResponse = await response.json();
+      const err_resp: PQKMSResponse<string> = await response.json();
       throw new Error(`Server error: ${err_resp.code} => ${err_resp.message}`);
     }
   }
@@ -334,36 +372,32 @@ export default class UserRegistrationManager {
       const response = await fetch(this.discoveryURL, {
         mode: "cors",
       });
-      console.log(`Server fetch returned code: ${response.status}`);
+      // console.log(`Server fetch returned code: ${response.status}`);
 
       if (response.status >= 200 && response.status < 300) {
-        this.urlDirectory = await response.json();
+        let versioned_directory: URLVersionedDirectory = await response.json();
+        this.urlDirectory = versioned_directory.v0;
       } else {
-        this.urlDirectory = {
-          enclave_list: "/v0/admin/enclaves",
-          register_domain: "/v0/admin/register_domain",
-        };
+        this.urlDirectory = default_v0_url_directory;
       }
     } catch (e) {
-      console.log(`Error getting enclave directory: ${e}`);
-      this.urlDirectory = {
-        enclave_list: "/v0/admin/enclaves",
-        register_domain: "/v0/admin/register_domain",
-      };
+      // console.log(`Error getting enclave directory: ${e}`);
+      this.urlDirectory = default_v0_url_directory;
     }
-    console.log(`Using URL directory: ${this.urlDirectory}`);
+    // console.log(`Using URL directory: ${this.urlDirectory}`);
     return this.urlDirectory;
   }
 
   async fetchEnclaveList(): Promise<ListModulesServerResponse> {
     let directory = await this.fetchDirectory();
     const fetchUrl = `${this.baseURL}${directory.enclave_list}`;
-    console.log(`Attempting to fetch the list of enclaves from ${fetchUrl}!`);
+    // console.log(`Attempting to fetch the list of enclaves from ${fetchUrl}!`);
     const response = await fetch(fetchUrl, {
       mode: "cors",
     });
 
-    const resp = await this.parseServerResponse(response);
+    const resp =
+      await this.parseServerResponse<ListModulesServerResponse>(response);
     return resp;
   }
 
@@ -371,14 +405,14 @@ export default class UserRegistrationManager {
     privateKey: CryptoKey,
     publicKey: CryptoKey,
     modulesReq: ListModulesServerResponse
-  ): Promise<ClientRequestForRegistration> {
+  ): Promise<ClientRegInit> {
     const enclaveSigner = new EnclaveSigner();
 
     assert(privateKey.type === "private");
     assert(publicKey.type === "public");
     let modulus = await extractModulus(publicKey, "big");
 
-    let result: ClientRequestForRegistration = {
+    let result: ClientRegInit = {
       user_info: null,
       server_nonce: null,
       signer_modulus: toHexString(modulus),
@@ -413,60 +447,191 @@ export default class UserRegistrationManager {
     return result;
   }
 
-  async registerUser(
+  async pssSign(
+    domain_name: string,
+    email_addr: string,
+    login_pub: Uint8Array,
+    enclave_keypair: CryptoKeyPair
+  ): Promise<Uint8Array> {
+    const rsa_priv = await EnclaveSigner.hsm().exportKey(
+      "pkcs8",
+      enclave_keypair.privateKey
+    );
+
+    const pss_signer = await EnclaveSigner.hsm().importKey(
+      "pkcs8",
+      rsa_priv,
+      {
+        name: "RSA-PSS",
+        hash: "SHA-256",
+      },
+      false,
+      ["sign"]
+    );
+
+    let tbs_data = concatBytes(
+      utf8ToBytes(domain_name),
+      utf8ToBytes(email_addr),
+      login_pub
+    );
+
+    let pss_signature = await EnclaveSigner.hsm().sign(
+      {
+        name: "RSA-PSS",
+        saltLength: 32,
+      },
+      pss_signer,
+      tbs_data
+    );
+    return new Uint8Array(pss_signature);
+  }
+
+  async regFinalMsg(
+    reg_init_msg: RegInitResp,
+    login_pub: Uint8Array,
+    enclave_keypair: CryptoKeyPair,
+    ecdsa_login_key: CryptoKey,
+    lockbox_key: CryptoKey
+  ): Promise<ClientRegFinish> {
+    // console .log(`Computing PSS signature on login pub`);
+    const pop_challenge = await this.pssSign(
+      reg_init_msg.user_info.domain_name,
+      reg_init_msg.user_info.email_addr,
+      login_pub,
+      enclave_keypair
+    );
+
+    // console .log(`Computing ECDSA signature as proof-of-possession`);
+    const pop_proof = await EnclaveSigner.hsm().sign(
+      {
+        name: "ECDSA",
+        hash: "SHA-384",
+      },
+      ecdsa_login_key,
+      pop_challenge
+    );
+
+    let iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+
+    const wrapped_data = await EnclaveSigner.hsm().wrapKey(
+      "pkcs8",
+      enclave_keypair.privateKey,
+      lockbox_key,
+      {
+        name: "AES-GCM",
+        iv: iv,
+      }
+    );
+
+    const aux_data = `${b64urlEncode(iv)}.${b64urlEncode(wrapped_data)}`;
+
+    const finish_msg: ClientRegFinish = {
+      server_nonce: reg_init_msg.server_nonce,
+      aead_data: reg_init_msg.aead_data,
+      user_pub: toHexString(login_pub),
+      user_pub_sig: toHexString(pop_challenge),
+      oprf_pop_sig: toHexString(pop_proof),
+      aux_data,
+    };
+
+    return finish_msg;
+  }
+
+  async regInit(
     raw_pw: string,
-    user_info: RegistrationReqInitMsg,
-    signing_key: CryptoKeyPair,
-    progress?: RegistrationProgressCallback
-  ) {
+    user_info: UserRegistrationInfo,
+    signing_key: CryptoKeyPair
+  ): Promise<RegInitResp> {
     const { privateKey: signing_priv, publicKey: mrsigner_pub } = signing_key;
 
     assert(signing_priv.type === "private");
     assert(mrsigner_pub.type === "public");
 
-    console.log(`Fetching enclave directory`);
+    // console .log(`Fetching enclave directory`);
     let directory = await this.fetchDirectory();
 
-    console.log(`Fetching list of enclaves`);
+    // console .log(`Fetching list of enclaves`);
     let enclaves = await this.fetchEnclaveList();
 
-    console.log(`Signing enclaves`);
+    // console .log(`Signing enclaves`);
     let signed = await this.signEnclaves(signing_priv, mrsigner_pub, enclaves);
 
-    console.log(`Computing OPRF Client Data`);
+    // console .log(`Computing OPRF Client Data`);
     await this.computeOprfClientData(raw_pw, user_info);
 
-    user_info.oprf_client_data = this.oprfClientData.clientRequestBytes;
+    user_info.auth_data = this.oprfClientData.clientRequestBytes;
 
     signed.user_info = user_info;
     signed.server_nonce = enclaves.resp_challenge;
 
-    console.log(`Attempting stage-1 of registration`);
-    let register_url = `${this.baseURL}${directory.register_domain}`;
+    // console .log(`Attempting registration init`);
+    let reg_init_url = `${this.baseURL}${directory.registration_init}`;
 
-    try {
-      let registerResult = await fetch(register_url, {
-        method: "POST",
-        mode: "cors",
-        cache: "no-cache",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(signed),
-      });
-      let resp = await this.parseServerResponse(registerResult);
-      if (resp.code >= 200 && resp.code < 300) {
-        return true;
-      } else {
-        return false;
-      }
-    } catch (e) {
-      return false;
-    }
+    let registerResult = await fetch(reg_init_url, {
+      method: "POST",
+      mode: "cors",
+      cache: "no-cache",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(signed),
+    });
+    return this.parseServerResponse<RegInitResp>(registerResult);
+  }
+
+  async regFinal(
+    init_resp: RegInitResp,
+    enclave_keypair: CryptoKeyPair
+  ): Promise<string> {
+    const directory = await this.fetchDirectory();
+
+    // console .log(`Finalizing OPRF session key`);
+    const session_key = await this.oprfClient.finalize(
+      init_resp.user_info.auth_data,
+      this.oprfClientData
+    );
+
+    // console .log(`Computing OPRF login key`);
+    const { loginKey, publicKey: login_pub } = await this.oprfClient.login_key(
+      session_key,
+      this.oprfClientData.hashed_password
+    );
+
+    // console .log(`Computing lockbox key`);
+    const lockbox_key = await this.oprfClient.lockbox_key(
+      session_key,
+      this.oprfClientData.hashed_password
+    );
+
+    const final_msg = await this.regFinalMsg(
+      init_resp,
+      login_pub,
+      enclave_keypair,
+      loginKey,
+      lockbox_key
+    );
+
+    let reg_fini_url = `${this.baseURL}${directory.registration_finish}`;
+
+    const json_data = JSON.stringify(final_msg);
+
+    // console .log(`Sending registration final message:\n${json_data}`);
+
+    let final_result = await fetch(reg_fini_url, {
+      method: "POST",
+      mode: "cors",
+      cache: "no-cache",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: json_data,
+    });
+
+    return this.parseServerResponse<string>(final_result);
   }
 }
 
-export function validate_domain_str(domain: string) {
+export function validateDomainStr(domain: string) {
   const regex = /^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]$/g;
   const found = domain.match(regex);
   if (!found) {
@@ -476,7 +641,7 @@ export function validate_domain_str(domain: string) {
   }
 }
 
-export function validate_raw_password_str(password: string) {
+export function validateRawPasswordStr(password: string) {
   if (password.length < 8) {
     throw new ValidationError(
       "Invalid password. Must be at least 8 characters"
@@ -484,7 +649,7 @@ export function validate_raw_password_str(password: string) {
   }
 }
 
-export function validate_username_str(user_email: string) {}
+export function validateUsernameStr(user_email: string) {}
 
 export async function pwhash(
   domain: string,
@@ -520,19 +685,20 @@ export async function register_user(
   base_url: string,
   crypto_key?: CryptoKeyPair
 ) {
-  validate_domain_str(domain);
-  validate_raw_password_str(password);
-  validate_username_str(email_addr);
+  validateDomainStr(domain);
+  validateRawPasswordStr(password);
+  validateUsernameStr(email_addr);
 
-  let reg = new UserRegistrationManager(base_url);
   const key_pair = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
 
-  let user: RegistrationReqInitMsg = {
+  let user: UserRegistrationInfo = {
     domain_name: domain,
     email_addr: email_addr,
-    oprf_client_data: null,
+    auth_algo: "OPRF.P384-SHA384",
+    auth_data: null,
   };
 
-  const registerUser = await reg.registerUser(password, user, key_pair);
-  console.log(`Registration `, registerUser ? "Successful" : "Failed");
+  let reg = new UserRegistrationManager(base_url);
+  const reg_init_data = await reg.regInit(password, user, key_pair);
+  await reg.regFinal(reg_init_data, key_pair);
 }

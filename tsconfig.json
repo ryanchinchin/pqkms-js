@@ -17,12 +17,14 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "removeComments": true
   },
 
   "files": [
     "src/index.ts",
     "src/enclave_signer.ts",
-    "src/index.dom.ts"
+    "src/index.dom.ts",
+    "src/oprf.ts"
   ]
 }

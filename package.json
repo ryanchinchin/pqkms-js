@@ -1,10 +1,13 @@
 {
   "name": "@securesubstrates/pqkms",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "pqkms front-end libraries",
   "type": "module",
   "scripts": {
-    "build": "tsc"
+    "tsc": "tsc",
+    "build": "npm install && npm run tsc",
+    "lint": "npx prettier --check 'src/**/*.{js,ts}'",
+    "format": "npx prettier --write 'src/**/*.{js,ts}'"
   },
   "repository": {
     "type": "git",
@@ -20,6 +23,7 @@
     "@types/node": "^20.6.2",
     "micro-should": "^0.4.0",
     "npx": "^10.2.2",
+    "prettier": "^3.0.3",
     "tslib": "^2.6.0",
     "typescript": "^5.2.2"
   },

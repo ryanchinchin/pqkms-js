@@ -1,22 +1,11 @@
 import { OprfClient, OprfClientInitData } from "./oprf.js";
 type endian_t = "big" | "little";
-interface ActivityCallback<T> {
-    start(): any;
-    end(is_success: boolean): any;
-}
-interface RegistrationProgressCallback {
-    fetchDirectory: ActivityCallback<void> | null;
-    keygen: ActivityCallback<CryptoKeyPair> | null;
-    sign: ActivityCallback<[SigStructTbsInfo]> | null;
-    oprf: ActivityCallback<OprfClientInitData> | null;
-    registrationInit: ActivityCallback<void> | null;
-    registrationFinal: ActivityCallback<void> | null;
-}
 export declare class ValidationError extends Error {
     constructor(message: string);
 }
 export declare const fromHexString: (hexString: string) => ArrayBuffer;
 export declare const toHexString: (bytes: ArrayBuffer) => string;
+export declare const b64urlEncode: (buffer: ArrayBuffer) => string;
 export declare const b64urlDecode: (b64encoded_data: string, endian?: endian_t) => ArrayBuffer;
 interface EnclaveConfig {
     mrenclave: string;
@@ -47,16 +36,30 @@ interface SigStructClientSigned {
     enclave_name: string;
     config: EnclaveConfig;
 }
-interface RegistrationReqInitMsg {
+interface UserRegistrationInfo {
     domain_name: string;
     email_addr: string;
-    oprf_client_data: string;
+    auth_algo: string;
+    auth_data: string;
 }
-interface ClientRequestForRegistration {
-    user_info: RegistrationReqInitMsg | null;
+interface ClientRegInit {
+    user_info: UserRegistrationInfo | null;
     server_nonce: string;
     signer_modulus: string;
     signed_enclaves: SigStructClientSigned[];
+}
+interface RegInitResp {
+    server_nonce: string;
+    aead_data: string;
+    user_info: UserRegistrationInfo;
+}
+interface ClientRegFinish {
+    server_nonce: string;
+    aead_data: string;
+    user_pub: string;
+    user_pub_sig: string;
+    oprf_pop_sig: string;
+    aux_data: string;
 }
 export declare class EnclaveSigner {
     static CRYPTO: Crypto;
@@ -68,8 +71,10 @@ export declare class EnclaveSigner {
     verify_enclave(tbsData: ArrayBuffer, signature: ArrayBuffer, signingPubKey: CryptoKey): Promise<boolean>;
 }
 interface URLDirectory {
+    attestation: string;
+    registration_init: string;
     enclave_list: string;
-    register_domain: string;
+    registration_finish: string;
 }
 export default class UserRegistrationManager {
     readonly discoveryURL: string;
@@ -78,16 +83,19 @@ export default class UserRegistrationManager {
     private oprfClientData;
     urlDirectory: URLDirectory;
     constructor(directoryUrl: string);
-    computeOprfClientData(raw_pw: string, user_info: RegistrationReqInitMsg): Promise<OprfClientInitData>;
-    parseServerResponse(response: Response): Promise<any>;
+    computeOprfClientData(raw_pw: string, user_info: UserRegistrationInfo): Promise<OprfClientInitData>;
+    parseServerResponse<T>(response: Response): Promise<T>;
     fetchDirectory(): Promise<URLDirectory>;
     fetchEnclaveList(): Promise<ListModulesServerResponse>;
-    signEnclaves(privateKey: CryptoKey, publicKey: CryptoKey, modulesReq: ListModulesServerResponse): Promise<ClientRequestForRegistration>;
-    registerUser(raw_pw: string, user_info: RegistrationReqInitMsg, signing_key: CryptoKeyPair, progress?: RegistrationProgressCallback): Promise<boolean>;
+    signEnclaves(privateKey: CryptoKey, publicKey: CryptoKey, modulesReq: ListModulesServerResponse): Promise<ClientRegInit>;
+    pssSign(domain_name: string, email_addr: string, login_pub: Uint8Array, enclave_keypair: CryptoKeyPair): Promise<Uint8Array>;
+    regFinalMsg(reg_init_msg: RegInitResp, login_pub: Uint8Array, enclave_keypair: CryptoKeyPair, ecdsa_login_key: CryptoKey, lockbox_key: CryptoKey): Promise<ClientRegFinish>;
+    regInit(raw_pw: string, user_info: UserRegistrationInfo, signing_key: CryptoKeyPair): Promise<RegInitResp>;
+    regFinal(init_resp: RegInitResp, enclave_keypair: CryptoKeyPair): Promise<string>;
 }
-export declare function validate_domain_str(domain: string): void;
-export declare function validate_raw_password_str(password: string): void;
-export declare function validate_username_str(user_email: string): void;
+export declare function validateDomainStr(domain: string): void;
+export declare function validateRawPasswordStr(password: string): void;
+export declare function validateUsernameStr(user_email: string): void;
 export declare function pwhash(domain: string, username: string, passwd: string, repeat?: number): Promise<Uint8Array>;
 export declare function register_user(domain: string, email_addr: string, password: string, base_url: string, crypto_key?: CryptoKeyPair): Promise<void>;
 export {};
