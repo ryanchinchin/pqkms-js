@@ -40,7 +40,8 @@ interface UserRegistrationInfo {
     domain_name: string;
     email_addr: string;
     auth_algo: string;
-    auth_data: string;
+    auth_data: string | null;
+    salt: string | null;
 }
 interface ClientRegInit {
     user_info: UserRegistrationInfo | null;
@@ -96,6 +97,6 @@ export default class UserRegistrationManager {
 export declare function validateDomainStr(domain: string): void;
 export declare function validateRawPasswordStr(password: string): void;
 export declare function validateUsernameStr(user_email: string): void;
-export declare function pwhash(domain: string, username: string, passwd: string, repeat?: number): Promise<Uint8Array>;
+export declare function pwhash(passwd: string, user_info: UserRegistrationInfo, key_length_bytes: number): Promise<Uint8Array>;
 export declare function register_user(domain: string, email_addr: string, password: string, base_url: string, crypto_key?: CryptoKeyPair): Promise<void>;
 export {};

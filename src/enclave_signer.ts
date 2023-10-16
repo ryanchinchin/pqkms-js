@@ -1,16 +1,10 @@
-import * as argon2 from "argon2-wasm-esm";
 import { OprfClient, OprfClientInitData, OprfError } from "./oprf.js";
 import { p384, hashToCurve } from "@noble/curves/p384";
-import { utf8ToBytes, concatBytes } from "@noble/curves/abstract/utils";
-
-// This is based on OWASP recommendataion from
-// https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
-const argon_config = {
-  time: 2, // the number of iterations: 2
-  mem: 19456, // used memory, in KiB: 19MiB
-  parallelism: 1, // desired parallelism
-  type: argon2.ArgonType.Argon2di, // or argon2.ArgonType.Argon2i
-};
+import {
+  utf8ToBytes,
+  concatBytes,
+  hexToBytes,
+} from "@noble/curves/abstract/utils";
 
 const isUND = (val: any): boolean => {
   return typeof val === "undefined";
@@ -177,7 +171,8 @@ interface UserRegistrationInfo {
   domain_name: string;
   email_addr: string;
   auth_algo: string;
-  auth_data: string;
+  auth_data: string | null;
+  salt: string | null;
 }
 
 interface ClientRegInit {
@@ -318,35 +313,25 @@ export default class UserRegistrationManager {
     raw_pw: string,
     user_info: UserRegistrationInfo
   ): Promise<OprfClientInitData> {
-    for (let i = 0; i < 5; i++) {
-      let argon_hash = await pwhash(
-        user_info.domain_name,
-        user_info.email_addr,
-        raw_pw,
-        i
-      );
+    try {
+      // Generate random 32-bytes salt
+      let salt = EnclaveSigner.CRYPTO.getRandomValues(new Uint8Array(32));
 
-      try {
-        this.oprfClientData = this.oprfClient.blind(argon_hash);
-        return this.oprfClientData;
-      } catch (e) {
-        if (e instanceof OprfError) {
-          if (e.err() == "HashedToInifinity") {
-            continue;
-          }
+      user_info.salt = toHexString(salt);
+      const password = await pwhash(raw_pw, user_info, p384.CURVE.nByteLength);
+      this.oprfClientData = this.oprfClient.blind(password);
+      return this.oprfClientData;
+    } catch (e) {
+      if (e instanceof OprfError) {
+        if (e.err() == "HashedToInifinity") {
+          return this.computeOprfClientData(raw_pw, user_info);
         }
-        throw e;
       }
+      throw e;
     }
-    throw new Error("Unusable password!");
   }
 
   async parseServerResponse<T>(response: Response): Promise<T> {
-    // let hdrs = new Map(response.headers);
-    // console.log(
-    //   `Server returned response code: ${response.status} ${response.statusText} with headers:\n ${response.headers}`
-    // );
-
     if (response.ok) {
       const resp: PQKMSResponse<T> = await response.json();
 
@@ -652,30 +637,36 @@ export function validateRawPasswordStr(password: string) {
 export function validateUsernameStr(user_email: string) {}
 
 export async function pwhash(
-  domain: string,
-  username: string,
   passwd: string,
-  repeat?: number // Used to avoid hashing to point at infinity
+  user_info: UserRegistrationInfo,
+  key_length_bytes: number
 ): Promise<Uint8Array> {
-  let salt_pt = passwd + domain + username + passwd;
+  const pwd_pt = passwd + user_info.domain_name + user_info.email_addr + passwd;
 
-  if (repeat != null) {
-    for (let j = 0; j < repeat; j++) {
-      salt_pt = `${passwd}${salt_pt}${passwd}`;
-    }
-  }
-
-  const argon_salt = new TextEncoder().encode(salt_pt);
-  const salt = new Uint8Array(
-    await EnclaveSigner.hsm().digest("SHA-256", argon_salt)
+  const raw_pwd = await EnclaveSigner.hsm().importKey(
+    "raw",
+    new TextEncoder().encode(pwd_pt),
+    {
+      name: "PBKDF2",
+    },
+    true,
+    ["deriveBits"]
   );
 
-  const argon_hash = await argon2.hash({
-    pass: passwd,
-    salt,
-    ...argon_config,
-  });
-  return argon_hash.hash;
+  let salt = hexToBytes(user_info.salt);
+
+  let key = await EnclaveSigner.hsm().deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 1000000,
+      hash: "SHA-256",
+    },
+    raw_pwd,
+    8 * key_length_bytes
+  );
+
+  return new Uint8Array(key);
 }
 
 export async function register_user(
@@ -696,6 +687,7 @@ export async function register_user(
     email_addr: email_addr,
     auth_algo: "OPRF.P384-SHA384",
     auth_data: null,
+    salt: null,
   };
 
   let reg = new UserRegistrationManager(base_url);

@@ -31,7 +31,6 @@
   "main": "lib/index.js",
   "browser": "lib/index.dom.js",
   "dependencies": {
-    "@noble/curves": "^1.2.0",
-    "argon2-wasm-esm": "^1.0.3"
+    "@noble/curves": "^1.2.0"
   }
 }
