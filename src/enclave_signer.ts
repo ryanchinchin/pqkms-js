@@ -649,7 +649,7 @@ export async function pwhash(
     {
       name: "PBKDF2",
     },
-    true,
+    false,
     ["deriveBits"]
   );
 
