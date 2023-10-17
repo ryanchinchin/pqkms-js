@@ -25,10 +25,10 @@ export declare class OprfClient {
     constructor(ec_group: CurveFn, hashToCurve: HashToCurveFn);
     curveName(): string;
     blind(hashed_password: UnicodeOrBytes): OprfClientInitData;
-    finalize(evaluatedElement: Hex, clientData: OprfClientInitData): Promise<Uint8Array>;
-    login_key(session_key: Uint8Array, hashed_pw: UnicodeOrBytes): Promise<{
+    finalize(evaluatedElement: Hex, clientData: OprfClientInitData): Promise<CryptoKey>;
+    login_key(hkdf_key: CryptoKey, hashed_pw: UnicodeOrBytes): Promise<{
         loginKey: CryptoKey;
         publicKey: Uint8Array;
     }>;
-    lockbox_key(session_key: Uint8Array, hashed_pw: UnicodeOrBytes): Promise<CryptoKey>;
+    lockbox_key(hkdf_key: CryptoKey, hashed_pw: UnicodeOrBytes): Promise<CryptoKey>;
 }

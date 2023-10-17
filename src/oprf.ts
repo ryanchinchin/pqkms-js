@@ -8,8 +8,6 @@ import {
 import { Field, IField, mod } from "@noble/curves/abstract/modular";
 import { CurveFn } from "@noble/curves/abstract/weierstrass";
 import { H2CPoint, htfBasicOpts } from "@noble/curves/abstract/hash-to-curve";
-import { sha512 } from "@noble/hashes/sha512";
-import { hkdf } from "@noble/hashes/hkdf";
 
 export * as utils from "@noble/curves/abstract/utils";
 
@@ -108,12 +106,13 @@ export class OprfClient {
   async finalize(
     evaluatedElement: Hex,
     clientData: OprfClientInitData
-  ): Promise<Uint8Array> {
+  ): Promise<CryptoKey> {
+    const subtle = window.crypto.subtle;
     let server_point = this.EcGroup.ProjectivePoint.fromHex(evaluatedElement);
 
     server_point.assertValidity();
     let uncompressed_bytes = server_point.toHex(false);
-    if (uncompressed_bytes == clientData.clientRequestBytes) {
+    if (uncompressed_bytes === clientData.clientRequestBytes) {
       throw Error(
         "Server tried to attack the client during OPRF finalize step by replaying the client's request"
       );
@@ -123,22 +122,24 @@ export class OprfClient {
 
     // See https://www.ietf.org/archive/id/draft-irtf-cfrg-voprf-21.html#section-3.3.1-6
 
-    let hashInput = concatBytes(
+    const hashInput = concatBytes(
       numberToBytesBE(clientData.hashed_password.length, 2),
       toUtf8Bytes(clientData.hashed_password),
       numberToBytesBE(final_point.length, 2),
       final_point,
       toUtf8Bytes("Finalize")
     );
-    let digest = await globalThis.crypto.subtle.digest(
-      "SHA-512",
-      hashInput.buffer
-    );
-    return new Uint8Array(digest);
+
+    const hkdf_raw_key = await subtle.digest("SHA-512", hashInput);
+
+    return subtle.importKey("raw", hkdf_raw_key, "HKDF", false, [
+      "deriveBits",
+      "deriveKey",
+    ]);
   }
 
   async login_key(
-    session_key: Uint8Array,
+    hkdf_key: CryptoKey,
     hashed_pw: UnicodeOrBytes
   ): Promise<{ loginKey: CryptoKey; publicKey: Uint8Array }> {
     const CURVE = this.EcGroup.CURVE;
@@ -147,16 +148,23 @@ export class OprfClient {
 
     const salt = concatBytes(
       toUtf8Bytes(hashed_pw),
-      toUtf8Bytes("LoginInfoSalt")
+      toUtf8Bytes("LoginKeySalt")
     );
-    const info = toUtf8Bytes("LoginInfo");
+    const info = toUtf8Bytes("LoginKey");
 
-    let privateKeyInp = bytesToNumberBE(
-      hkdf(sha512, session_key, salt, info, 512 / 8)
+    const derived_scalar = await window.crypto.subtle.deriveBits(
+      {
+        name: "HKDF",
+        hash: "SHA-512",
+        salt: salt.buffer,
+        info: info.buffer,
+      },
+      hkdf_key,
+      2 * CURVE.nByteLength * 8
     );
 
+    let privateKeyInp = bytesToNumberBE(new Uint8Array(derived_scalar));
     let loginKey = mod(privateKeyInp, CURVE.n);
-
     let publicPoint = ProjectivePoint.fromPrivateKey(loginKey);
 
     let jwk: JsonWebKey = {
@@ -184,7 +192,7 @@ export class OprfClient {
   }
 
   async lockbox_key(
-    session_key: Uint8Array,
+    hkdf_key: CryptoKey,
     hashed_pw: UnicodeOrBytes
   ): Promise<CryptoKey> {
     const crypto = globalThis.crypto.subtle;
@@ -195,15 +203,17 @@ export class OprfClient {
     );
     const info = toUtf8Bytes("LockboxKey");
 
-    let aes_key_raw = hkdf(sha512, session_key, salt, info, 256 / 8);
-
-    let aes_key = await crypto.importKey("raw", aes_key_raw, "AES-GCM", false, [
-      "encrypt",
-      "decrypt",
-      "wrapKey",
-      "unwrapKey",
-    ]);
-
-    return aes_key;
+    return window.crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-512",
+        salt: salt.buffer,
+        info: info.buffer,
+      },
+      hkdf_key,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt", "wrapKey", "unwrapKey"]
+    );
   }
 }
