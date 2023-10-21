@@ -79,6 +79,19 @@ export class OprfClient {
     }
   }
 
+  hashAlgo(): string {
+    const bits = this.EcGroup.CURVE.Fp.BITS;
+    if (bits === 256) {
+      return "SHA-256";
+    } else if (bits === 384) {
+      return "SHA-384";
+    } else if (bits === 521) {
+      return "SHA-512";
+    } else {
+      throw new OprfError("UnknownCurveType" as const);
+    }
+  }
+
   blind(hashed_password: UnicodeOrBytes): OprfClientInitData {
     let blinder = this.EcGroup.utils.randomPrivateKey();
     let blinder_int = bytesToNumberBE(blinder);
@@ -118,7 +131,9 @@ export class OprfClient {
       );
     }
     let inv_blind = this.Fq.inv(clientData.blinder);
-    let final_point = server_point.multiply(inv_blind).toRawBytes(false);
+    // This point is compressed in Rust VOPRF implementation, so we make
+    // it compressed as well.
+    let final_point = server_point.multiply(inv_blind).toRawBytes(true);
 
     // See https://www.ietf.org/archive/id/draft-irtf-cfrg-voprf-21.html#section-3.3.1-6
 
@@ -130,7 +145,7 @@ export class OprfClient {
       toUtf8Bytes("Finalize")
     );
 
-    const hkdf_raw_key = await subtle.digest("SHA-512", hashInput);
+    const hkdf_raw_key = await subtle.digest(this.hashAlgo(), hashInput);
 
     return subtle.importKey("raw", hkdf_raw_key, "HKDF", false, [
       "deriveBits",
@@ -152,7 +167,7 @@ export class OprfClient {
     );
     const info = toUtf8Bytes("LoginKey");
 
-    const derived_scalar = await window.crypto.subtle.deriveBits(
+    const derived_scalar = await crypto.deriveBits(
       {
         name: "HKDF",
         hash: "SHA-512",
@@ -160,7 +175,7 @@ export class OprfClient {
         info: info.buffer,
       },
       hkdf_key,
-      2 * CURVE.nByteLength * 8
+      8 * ((3 * CURVE.nByteLength) / 2)
     );
 
     let privateKeyInp = bytesToNumberBE(new Uint8Array(derived_scalar));
@@ -203,7 +218,7 @@ export class OprfClient {
     );
     const info = toUtf8Bytes("LockboxKey");
 
-    return window.crypto.subtle.deriveKey(
+    return crypto.deriveKey(
       {
         name: "HKDF",
         hash: "SHA-512",

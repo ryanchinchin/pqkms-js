@@ -24,6 +24,7 @@ export declare class OprfClient {
     readonly coordinateSize: number;
     constructor(ec_group: CurveFn, hashToCurve: HashToCurveFn);
     curveName(): string;
+    hashAlgo(): string;
     blind(hashed_password: UnicodeOrBytes): OprfClientInitData;
     finalize(evaluatedElement: Hex, clientData: OprfClientInitData): Promise<CryptoKey>;
     login_key(hkdf_key: CryptoKey, hashed_pw: UnicodeOrBytes): Promise<{
