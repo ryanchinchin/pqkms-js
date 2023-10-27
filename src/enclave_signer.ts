@@ -167,16 +167,27 @@ interface SigStructClientSigned {
   config: EnclaveConfig;
 }
 
-interface UserRegistrationInfo {
+interface UserAuthInfo {
   domain_name: string;
-  email_addr: string;
+  user_name: string;
   auth_algo: string;
   auth_data: string | null;
   salt: string | null;
 }
 
+interface UserInfo extends UserAuthInfo {
+  mrsigner: string;
+  aux_data?: string;
+}
+
+interface LoginMessage {
+  server_nonce: string;
+  challenge: string;
+  user_info: UserAuthInfo;
+}
+
 interface ClientRegInit {
-  user_info: UserRegistrationInfo | null;
+  user_info: UserAuthInfo | null;
   server_nonce: string;
   signer_modulus: string;
   signed_enclaves: SigStructClientSigned[];
@@ -185,7 +196,7 @@ interface ClientRegInit {
 interface RegInitResp {
   server_nonce: string;
   aead_data: string;
-  user_info: UserRegistrationInfo;
+  user_info: UserAuthInfo;
 }
 
 interface ClientRegFinish {
@@ -311,7 +322,7 @@ export default class UserRegistrationManager {
 
   async computeOprfClientData(
     raw_pw: string,
-    user_info: UserRegistrationInfo
+    user_info: UserAuthInfo
   ): Promise<OprfClientInitData> {
     try {
       // Generate random 32-bytes salt
@@ -481,7 +492,7 @@ export default class UserRegistrationManager {
     // console .log(`Computing PSS signature on login pub`);
     const pop_challenge = await this.pssSign(
       reg_init_msg.user_info.domain_name,
-      reg_init_msg.user_info.email_addr,
+      reg_init_msg.user_info.user_name,
       login_pub,
       enclave_keypair
     );
@@ -524,7 +535,7 @@ export default class UserRegistrationManager {
 
   async regInit(
     raw_pw: string,
-    user_info: UserRegistrationInfo,
+    user_info: UserAuthInfo,
     signing_key: CryptoKeyPair
   ): Promise<RegInitResp> {
     const { privateKey: signing_priv, publicKey: mrsigner_pub } = signing_key;
@@ -638,10 +649,10 @@ export function validateUsernameStr(user_email: string) {}
 
 export async function pwhash(
   passwd: string,
-  user_info: UserRegistrationInfo,
+  user_info: UserAuthInfo,
   key_length_bytes: number
 ): Promise<Uint8Array> {
-  const pwd_pt = passwd + user_info.domain_name + user_info.email_addr + passwd;
+  const pwd_pt = passwd + user_info.domain_name + user_info.user_name + passwd;
 
   const raw_pwd = await EnclaveSigner.hsm().importKey(
     "raw",
@@ -682,9 +693,9 @@ export async function register_user(
 
   const key_pair = crypto_key || (await new EnclaveSigner().sgx_rsa_key());
 
-  let user: UserRegistrationInfo = {
+  let user: UserAuthInfo = {
     domain_name: domain,
-    email_addr: email_addr,
+    user_name: email_addr,
     auth_algo: "OPRF.P384-SHA384",
     auth_data: null,
     salt: null,
