@@ -30,7 +30,6 @@
   },
   "types": "lib/index.d.ts",
   "main": "lib/index.js",
-  "browser": "lib/index.dom.js",
   "dependencies": {
     "@noble/curves": "^1.2.0"
   }
