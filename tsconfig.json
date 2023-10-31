@@ -22,6 +22,7 @@
   },
 
   "files": [
+      "src/auth_base.ts",
       "src/index.ts",
       "src/enclave_signer.ts",
       "src/oprf.ts",

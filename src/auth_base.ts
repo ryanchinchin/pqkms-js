@@ -10,6 +10,23 @@ export interface UserAuthInfo {
   salt: string | null;
 }
 
+export interface UserInfo extends UserAuthInfo {
+  mrsigner: string;
+  aux_data?: string;
+  access_url?: string;
+}
+
+export function to_auth_info(user_info: UserInfo): UserAuthInfo {
+  const { domain_name, user_name, auth_algo, auth_data, salt } = user_info;
+  return {
+    domain_name,
+    user_name,
+    auth_data,
+    auth_algo,
+    salt,
+  };
+}
+
 export interface URLVersionedDirectory<T> {
   v0: T;
 }
@@ -19,7 +36,7 @@ interface PQKMSResponse<T> {
   message: T;
 }
 
-export class UserAuthBase {
+export abstract class UserAuthBase {
   readonly discoveryURL: string;
   readonly baseURL: string;
   readonly oprfClient: OprfClient;
@@ -42,8 +59,14 @@ export class UserAuthBase {
     user_info: UserAuthInfo
   ): Promise<OprfClientInitData> {
     try {
-      // Generate random 32-bytes salt
-      let salt = window.crypto.getRandomValues(new Uint8Array(32));
+      let salt = null;
+
+      if (user_info.salt) {
+        salt = user_info.salt;
+      } else {
+        // Generate random 32-bytes salt
+        salt = window.crypto.getRandomValues(new Uint8Array(32));
+      }
 
       user_info.salt = toHexString(salt);
       const password = await pwhash(raw_pw, user_info, p384.CURVE.nByteLength);
@@ -74,6 +97,32 @@ export class UserAuthBase {
       const err_resp: PQKMSResponse<string> = await response.json();
       throw new Error(`Server error: ${err_resp.code} => ${err_resp.message}`);
     }
+  }
+
+  abstract fetchDirectory(): Promise<any>;
+
+  async fetchUserInfo(
+    user_name: string,
+    domain_name?: string,
+    auth_algo?: string
+  ): Promise<Array<UserInfo>> {
+    const directory = await this.fetchDirectory();
+    let user_info_url = `${this.discoveryURL}${directory.user_info}?user_name=${user_name}`;
+
+    if (domain_name) {
+      user_info_url = `${user_info_url}&domain=${domain_name}`;
+    }
+
+    if (auth_algo) {
+      user_info_url = `${user_info_url}&domain=${auth_algo}`;
+    }
+
+    const response = await fetch(user_info_url, {
+      mode: "cors",
+      cache: "no-store",
+    });
+
+    return this.parseServerResponse<Array<UserInfo>>(response);
   }
 }
 

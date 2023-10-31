@@ -1,4 +1,4 @@
-import { UserAuthManager, UrlDirectory, UserAuthInfo } from "./login.js";
+import { UserAuthBase, UserAuthInfo } from "./auth_base.js";
 interface EnclaveConfig {
     mrenclave: string;
     attributes: string[];
@@ -47,9 +47,17 @@ interface ClientRegFinish {
     oprf_pop_sig: string;
     aux_data: string;
 }
-export default class UserRegistrationManager extends UserAuthManager {
+export interface RegistrationDirectory {
+    attestation: string;
+    registration_init: string;
+    enclave_list: string;
+    registration_finish: string;
+    user_info: string;
+}
+export default class UserRegistrationManager extends UserAuthBase {
+    protected directory: RegistrationDirectory | null;
     constructor(directoryUrl: string);
-    fetchDirectory(): Promise<UrlDirectory>;
+    fetchDirectory(): Promise<RegistrationDirectory>;
     fetchEnclaveList(): Promise<ListModulesServerResponse>;
     signEnclaves(privateKey: CryptoKey, publicKey: CryptoKey, modulesReq: ListModulesServerResponse): Promise<ClientRegInit>;
     pssSign(domain_name: string, email_addr: string, login_pub: Uint8Array, enclave_keypair: CryptoKeyPair): Promise<Uint8Array>;

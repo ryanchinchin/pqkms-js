@@ -32,6 +32,25 @@ export class ValidationError extends Error {
   }
 }
 
+export class InvalidRequest extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidRequest";
+  }
+}
+
+export class AuthenticationFailed extends Error {
+  constructor(
+    readonly reason: string,
+    readonly user_name: string,
+    readonly domain: string
+  ) {
+    const m = `Authentication failed for user '${user_name}', project '${domain}'. Reason: ${reason}`;
+    super(m);
+    this.name = "AuthenticationFailed";
+  }
+}
+
 export const fromHexString = (hexString: string): ArrayBuffer => {
   if (hexString.startsWith("0x") || hexString.startsWith("0X")) {
     hexString = hexString.substring(2);

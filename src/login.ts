@@ -1,171 +1,162 @@
 import {
-  UserAuthBase,
-  URLVersionedDirectory,
-  UserAuthInfo,
+    UserAuthBase,
+    URLVersionedDirectory,
+    UserAuthInfo,
+    UserInfo,
+    to_auth_info,
 } from "./auth_base.js";
 
-export interface UserInfo extends UserAuthInfo {
-  mrsigner: string;
-  aux_data?: string;
-}
+import { InvalidRequest, assert } from "./utils";
 
 export interface ProjectDirectory {
-  attestation: string;
-  login_init: string;
-  login_finish: string;
-  user_info: string;
+    attestation: string;
+    login_init: string;
+    login_finish: string;
+    user_info: string;
 }
 
 interface LoginMessage {
-  server_nonce: string;
-  challenge: string;
-  user_info: UserAuthInfo;
+    server_nonce: string;
+    challenge: string;
+    user_info: UserAuthInfo;
 }
 
 const default_v0_app_directory: ProjectDirectory = {
-  attestation: "/v0/admin/attestation",
-  login_init: "/v0/admin/login_init",
-  login_finish: "/v0/admin/reg_finish",
-  user_info: "/v0/admin/user_info",
+    attestation: "/v0/admin/attestation",
+    login_init: "/v0/admin/login_init",
+    login_finish: "/v0/admin/reg_finish",
+    user_info: "/v0/admin/user_info",
 };
 
 export default class AuthManager extends UserAuthBase {
-  protected directory: ProjectDirectory | null = null;
+    protected directory: ProjectDirectory | null = null;
 
-  constructor(directoryUrl: string) {
-    super(directoryUrl);
-  }
-
-  async fetchDirectory(): Promise<ProjectDirectory> {
-    if (this.directory) {
-      return this.directory;
+    constructor(directoryUrl: string) {
+        super(directoryUrl);
     }
 
-    try {
-      const response = await fetch(super.discoveryURL, {
-        mode: "cors",
-      });
-      // console.log(`Server fetch returned code: ${response.status}`);
-
-      if (response.ok) {
-        let versioned_directory: URLVersionedDirectory<ProjectDirectory> =
-          await response.json();
-        this.directory = versioned_directory.v0;
-      } else {
-        this.directory = default_v0_app_directory;
-      }
-    } catch (e) {
-      // console.log(`Error getting enclave directory: ${e}`);
-      this.directory = default_v0_app_directory;
+    async loginFinalMsg(msg: LoginMessage): Promise<LoginMessage> {
+        return msg;
     }
-    // console.log(`Using URL directory: ${this.urlDirectory}`);
 
-    return this.directory!;
-  }
+    async fetchDirectory(): Promise<ProjectDirectory> {
+        if (this.directory) {
+            return this.directory;
+        }
 
-  async fetchUserInfo(user_name: string): Promise<Array<UserInfo>> {
-    const directory = await this.fetchDirectory();
-    const user_info_url = `${super.discoveryURL}${
-      directory.user_info
-    }?user_name=${user_name}`;
+        try {
+            const response = await fetch(super.discoveryURL, {
+                mode: "cors",
+                cache: "no-store",
+            });
+            // console.log(`Server fetch returned code: ${response.status}`);
 
-    const response = await fetch(user_info_url, {
-      mode: "cors",
-    });
+            if (response.ok) {
+                let versioned_directory: URLVersionedDirectory<ProjectDirectory> =
+                    await response.json();
+                this.directory = versioned_directory.v0;
+            } else {
+                this.directory = default_v0_app_directory;
+            }
+        } catch (e) {
+            // console.log(`Error getting enclave directory: ${e}`);
+            this.directory = default_v0_app_directory;
+        }
+        // console.log(`Using URL directory: ${this.urlDirectory}`);
 
-    return super.parseServerResponse<Array<UserInfo>>(response);
-  }
+        return this.directory!;
+    }
 
-  async loginInit(
-    raw_pw: string,
-    user_info: UserAuthInfo,
-    signing_key: CryptoKeyPair
-  ): Promise<RegInitResp> {
-    const { privateKey: signing_priv, publicKey: mrsigner_pub } = signing_key;
+    // Compute init request data given input from `loginInit` request
+    async loginInit(
+        user_name: string,
+        domain_name: string,
+        raw_pw: string
+    ): Promise<LoginMessage> {
+        // console .log(`Fetching enclave directory`);
+        const directory = await this.fetchDirectory();
+        const user_info_list = await this.fetchUserInfo(user_name, domain_name);
 
-    assert(signing_priv.type === "private");
-    assert(mrsigner_pub.type === "public");
+        let user_info: UserInfo;
 
-    // console .log(`Fetching enclave directory`);
-    let directory = await this.fetchDirectory();
+        if (user_info_list.length === 0) {
+            throw new InvalidRequest(
+                `No record found for user '${user_name}' and project name ${domain_name}`
+            );
+        } else if (user_info_list.length > 1) {
+            throw new InvalidRequest(
+                `Server misconfiguration. Has more than one entry for user '${user_name}' and project '${domain_name}'`
+            );
+        } else {
+            console.log(
+                `Found user_info for user '${user_name}' and project '${domain_name}'`
+            );
 
-    // console .log(`Fetching list of enclaves`);
-    let enclaves = await this.fetchEnclaveList();
+            user_info = user_info_list[0];
+        }
 
-    // console .log(`Signing enclaves`);
-    let signed = await this.signEnclaves(signing_priv, mrsigner_pub, enclaves);
+        assert(!user_info);
+        assert(user_info.auth_algo === "OPRF.P384-SHA384");
 
-    // console .log(`Computing OPRF Client Data`);
-    await this.computeOprfClientData(raw_pw, user_info);
+        let user_auth_info: UserAuthInfo = to_auth_info(user_info);
+        let clientData = await this.computeOprfClientData(raw_pw, user_auth_info);
+        user_auth_info.auth_data = clientData.clientRequestBytes;
+        let login_init_url = `${this.baseURL}${directory.login_init}`;
 
-    user_info.auth_data = this.oprfClientData!.clientRequestBytes;
+        delete user_auth_info.salt;
 
-    signed.user_info = user_info;
-    signed.server_nonce = enclaves.resp_challenge;
+        let registerResult = await fetch(login_init_url, {
+            method: "POST",
+            mode: "cors",
+            cache: "no-store",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(user_auth_info),
+        });
+        return this.parseServerResponse<LoginMessage>(registerResult);
+    }
 
-    // console .log(`Attempting registration init`);
-    let reg_init_url = `${this.baseURL}${directory.registration_init}`;
+    // Compute the final response data given input from `loginInit` request
+    async loginFinal(login_init_resp: LoginMessage): Promise<boolean> {
+        const directory = await this.fetchDirectory();
 
-    let registerResult = await fetch(reg_init_url, {
-      method: "POST",
-      mode: "cors",
-      cache: "no-cache",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(signed),
-    });
-    return this.parseServerResponse<RegInitResp>(registerResult);
-  }
+        // console .log(`Finalizing OPRF session key`);
+        const session_key = await this.oprfClient.finalize(
+            login_init_resp.user_info.auth_data!,
+            this.oprfClientData!
+        );
 
-  async regFinal(
-    init_resp: RegInitResp,
-    enclave_keypair: CryptoKeyPair
-  ): Promise<string> {
-    const directory = await this.fetchDirectory();
+        // console .log(`Computing OPRF login key`);
+        const { loginKey, publicKey: login_pub } = await this.oprfClient.login_key(
+            session_key,
+            this.oprfClientData!.hashed_password
+        );
 
-    // console .log(`Finalizing OPRF session key`);
-    const session_key = await this.oprfClient.finalize(
-      init_resp.user_info.auth_data!,
-      this.oprfClientData!
-    );
+        const final_msg = await this.loginFinalMsg(login_init_resp);
+        const json_data = JSON.stringify(final_msg);
 
-    // console .log(`Computing OPRF login key`);
-    const { loginKey, publicKey: login_pub } = await this.oprfClient.login_key(
-      session_key,
-      this.oprfClientData!.hashed_password
-    );
+        let login_fini_url = `${this.baseURL}${directory.login_finish}`;
 
-    // console .log(`Computing lockbox key`);
-    const lockbox_key = await this.oprfClient.lockbox_key(
-      session_key,
-      this.oprfClientData!.hashed_password
-    );
+        let final_result = await fetch(login_fini_url, {
+            method: "POST",
+            mode: "cors",
+            cache: "no-cache",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: json_data,
+        });
 
-    const final_msg = await this.regFinalMsg(
-      init_resp,
-      login_pub,
-      enclave_keypair,
-      loginKey,
-      lockbox_key
-    );
+        return final_result.ok;
+    }
+}
 
-    let reg_fini_url = `${this.baseURL}${directory.registration_finish}`;
-
-    const json_data = JSON.stringify(final_msg);
-
-    // console .log(`Sending registration final message:\n${json_data}`);
-
-    let final_result = await fetch(reg_fini_url, {
-      method: "POST",
-      mode: "cors",
-      cache: "no-cache",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: json_data,
-    });
-
-    return this.parseServerResponse<string>(final_result);
-  }
+export async function login_user(
+    domain_name: string,
+    user_name: string,
+    raw_passwd: string,
+    auth_algo: string
+): Promise<boolean> {
+    return false;
 }
