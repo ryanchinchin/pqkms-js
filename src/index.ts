@@ -1,6 +1,7 @@
 export interface UserProjectsInfo {
   domain_name: string;
   user_name: string;
+  salt: string;
   auth_algo: string;
   mrsigner: string;
   access_url: string;
@@ -12,13 +13,25 @@ export async function register_user(
   password: string,
   base_url: string,
   crypto_key?: CryptoKeyPair
-) {
+): Promise<string> {
   const urm = await import("./registration");
   return urm.register_user(domain, user_name, password, base_url, crypto_key);
 }
 
-export async function login_user(user_projs: UserProjectsInfo) {
+export async function login_user(
+  pi: UserProjectsInfo,
+  raw_passwd: string
+): Promise<boolean> {
   const login = await import("./login");
+  const access_url = `https://${pi.access_url}`;
+  return login.login_user(
+    pi.domain_name,
+    pi.user_name,
+    raw_passwd,
+    pi.salt,
+    pi.auth_algo,
+    access_url
+  );
 }
 
 export async function fetch_user_projects(

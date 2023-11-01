@@ -68,5 +68,5 @@ export default class UserRegistrationManager extends UserAuthBase {
 export declare function validateDomainStr(domain: string): void;
 export declare function validateRawPasswordStr(password: string): void;
 export declare function validateUsernameStr(user_email: string): void;
-export declare function register_user(domain: string, email_addr: string, password: string, base_url: string, crypto_key?: CryptoKeyPair): Promise<void>;
+export declare function register_user(domain: string, email_addr: string, password: string, base_url: string, crypto_key?: CryptoKeyPair): Promise<string>;
 export {};

@@ -13,10 +13,10 @@ interface LoginMessage {
 export default class AuthManager extends UserAuthBase {
     protected directory: ProjectDirectory | null;
     constructor(directoryUrl: string);
-    loginFinalMsg(msg: LoginMessage): Promise<LoginMessage>;
+    loginFinalMsg(msg: LoginMessage, login_key: CryptoKey): Promise<LoginMessage>;
     fetchDirectory(): Promise<ProjectDirectory>;
-    loginInit(user_name: string, domain_name: string, raw_pw: string): Promise<LoginMessage>;
+    loginInit(auth_info: UserAuthInfo, raw_pw: string): Promise<LoginMessage>;
     loginFinal(login_init_resp: LoginMessage): Promise<boolean>;
 }
-export declare function login_user(domain_name: string, user_name: string, raw_passwd: string, auth_algo: string): Promise<boolean>;
+export declare function login_user(domain_name: string, user_name: string, raw_passwd: string, salt: string, auth_algo: string, access_url: string): Promise<boolean>;
 export {};

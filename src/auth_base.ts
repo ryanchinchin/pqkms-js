@@ -59,16 +59,12 @@ export abstract class UserAuthBase {
     user_info: UserAuthInfo
   ): Promise<OprfClientInitData> {
     try {
-      let salt = null;
-
-      if (user_info.salt) {
-        salt = user_info.salt;
-      } else {
-        // Generate random 32-bytes salt
-        salt = window.crypto.getRandomValues(new Uint8Array(32));
+      if (!user_info.salt) {
+        user_info.salt = toHexString(
+          window.crypto.getRandomValues(new Uint8Array(32))
+        );
       }
 
-      user_info.salt = toHexString(salt);
       const password = await pwhash(raw_pw, user_info, p384.CURVE.nByteLength);
       this.oprfClientData = this.oprfClient.blind(password);
       return this.oprfClientData;

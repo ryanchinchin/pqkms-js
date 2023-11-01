@@ -412,7 +412,7 @@ export async function register_user(
   password: string,
   base_url: string,
   crypto_key?: CryptoKeyPair
-) {
+): Promise<string> {
   validateDomainStr(domain);
   validateRawPasswordStr(password);
   validateUsernameStr(email_addr);
@@ -429,5 +429,5 @@ export async function register_user(
 
   let reg = new UserRegistrationManager(base_url);
   const reg_init_data = await reg.regInit(password, user, key_pair);
-  await reg.regFinal(reg_init_data, key_pair);
+  return reg.regFinal(reg_init_data, key_pair);
 }
