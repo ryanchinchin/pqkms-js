@@ -1,4 +1,4 @@
-import { endian_t, assert, isUND, b64urlDecode } from "./utils.js";
+import { endian_t, assert, isUND, b64urlDecode, browserType } from "./utils.js";
 
 export const extractModulus = async (
   key: CryptoKey,
@@ -37,17 +37,22 @@ export class EnclaveSigner {
   }
 
   async sgx_rsa_key(): Promise<CryptoKeyPair> {
-    const publicExponent = new Uint8Array([0x03]);
-    const usage: KeyUsage[] = ["sign", "verify"];
+    if (browserType() === "Safari") {
+      const { sgxCompatKey } = await import("./compat");
+      return sgxCompatKey(EnclaveSigner.hsm());
+    } else {
+      const publicExponent = new Uint8Array([0x03]);
+      const usage: KeyUsage[] = ["sign", "verify"];
 
-    const params: RsaHashedKeyGenParams = {
-      name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 3072,
-      publicExponent,
-      hash: "SHA-256",
-    };
-    const key = await EnclaveSigner.hsm().generateKey(params, true, usage);
-    return key;
+      const params: RsaHashedKeyGenParams = {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 3072,
+        publicExponent,
+        hash: "SHA-256",
+      };
+      const key = await EnclaveSigner.hsm().generateKey(params, true, usage);
+      return key;
+    }
   }
 
   async sign_enclave(

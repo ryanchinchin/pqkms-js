@@ -2,7 +2,14 @@ export const isUND = (val: any): boolean => {
   return typeof val === "undefined";
 };
 
-export { concatBytes, utf8ToBytes, hexToBytes } from "@noble/hashes/utils";
+export {
+  bytesToNumberBE,
+  numberToBytesBE,
+  utf8ToBytes,
+  concatBytes,
+  hexToBytes,
+  numberToVarBytesBE,
+} from "@noble/curves/abstract/utils";
 
 export type endian_t = "big" | "little";
 
@@ -115,3 +122,33 @@ export const b64urlDecode = function (
 
   return result.slice(0, counter);
 };
+
+export type BrowserType =
+  | "Opera"
+  | "Edge"
+  | "Chrome"
+  | "Safari"
+  | "Firefox"
+  | "MSIE"
+  | "Unknown";
+
+export function browserType(): BrowserType {
+  if (
+    (navigator.userAgent.indexOf("Opera") ||
+      navigator.userAgent.indexOf("OPR")) != -1
+  ) {
+    return "Opera";
+  } else if (navigator.userAgent.indexOf("Edg") != -1) {
+    return "Edge";
+  } else if (navigator.userAgent.indexOf("Chrome") != -1) {
+    return "Chrome";
+  } else if (navigator.userAgent.indexOf("Safari") != -1) {
+    return "Safari";
+  } else if (navigator.userAgent.indexOf("Firefox") != -1) {
+    return "Firefox";
+  } else if (navigator.userAgent.indexOf("MSIE") != -1) {
+    return "MSIE";
+  } else {
+    return "Unknown";
+  }
+}
