@@ -2,11 +2,19 @@ import {
   UserAuthBase,
   URLVersionedDirectory,
   UserAuthInfo,
-  UserInfo,
-  to_auth_info,
 } from "./auth_base.js";
 
-import { InvalidRequest, assert, fromHexString, toHexString } from "./utils";
+import {
+  InvalidRequest,
+  ValidationError,
+  AuthenticationFailed,
+  assert,
+  fromHexString,
+  toHexString,
+  b64urlDecode,
+} from "./utils";
+
+const X_AUTHORIZATION_TOKEN: string = "X-Authorization-PQKMS-Token";
 
 export interface ProjectDirectory {
   attestation: string;
@@ -19,6 +27,108 @@ interface LoginMessage {
   server_nonce: string;
   challenge: string;
   user_info: UserAuthInfo;
+}
+
+interface LoginFinalResp {
+  user_name: string;
+  domain: string;
+  auth_token: string;
+  aux_data?: string;
+  not_before: string;
+  not_after: string;
+}
+
+interface PQKMSResponse<T> {
+  code: number;
+  message: T;
+}
+
+class AuthIO {
+  constructor(
+    private readonly login_data: LoginFinalResp,
+    private readonly lockbox_key?: CryptoKey,
+    private readonly subtle?: SubtleCrypto
+  ) {
+    this.subtle = this.subtle || globalThis.crypto.subtle;
+  }
+
+  async fetch<U, T>(
+    url: string | URL | Request,
+    method: string,
+    data?: T,
+    headers?: HeadersInit
+  ): Promise<U> {
+    if (this.login_data.auth_token.length === 0) {
+      throw new InvalidRequest("User unauthenticated");
+    }
+
+    let hdrs = headers || {};
+
+    hdrs["Authorization"] = `Bearer ${this.login_data.auth_token}`;
+
+    let body = null;
+
+    if (data) {
+      hdrs["Content-Type"] = hdrs["Content-Type"] || "application/json";
+      body = JSON.stringify(data);
+    }
+
+    let response: Response = await fetch(url, {
+      method,
+      mode: "cors",
+      cache: "no-cache",
+      keepalive: true,
+      headers: hdrs,
+      body,
+    });
+
+    return this.parse<U>(response);
+  }
+
+  private async parse<T>(response: Response): Promise<T> {
+    if (response.ok) {
+      const resp: PQKMSResponse<T> = await response.json();
+
+      if (resp.code >= 200 && resp.code < 300) {
+        return resp.message;
+      } else {
+        throw new Error(`${resp.message}`);
+      }
+    } else {
+      const err_resp: PQKMSResponse<string> = await response.json();
+      throw new Error(`${JSON.stringify(err_resp)}`);
+    }
+  }
+
+  async enclaveSigningKey(): Promise<CryptoKey> {
+    if (!this.lockbox_key || !this.login_data.aux_data) {
+      throw new InvalidRequest("enclave signing key unavailable");
+    }
+    let values = this.login_data.aux_data!.split(`.`);
+
+    if (values.length !== 2) {
+      throw new InvalidRequest("Invalid auxilary data");
+    }
+
+    const iv = b64urlDecode(values[0], "big");
+    const wrapped_key = b64urlDecode(values[1], "big");
+
+    return this.subtle!.unwrapKey(
+      "pkcs8",
+      wrapped_key,
+      this.lockbox_key!,
+      {
+        name: "AES-GCM",
+        iv: iv,
+      },
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256",
+      },
+      true,
+      ["sign"]
+    );
+  }
 }
 
 const default_v0_app_directory: ProjectDirectory = {
@@ -61,6 +171,7 @@ export default class AuthManager extends UserAuthBase {
       const response = await fetch(this.discoveryURL, {
         mode: "cors",
         cache: "no-store",
+        keepalive: true,
       });
       // console.log(`Server fetch returned code: ${response.status}`);
 
@@ -102,12 +213,13 @@ export default class AuthManager extends UserAuthBase {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(auth_info),
+      keepalive: true,
     });
     return this.parseServerResponse<LoginMessage>(registerResult);
   }
 
   // Compute the final response data given input from `loginInit` request
-  async loginFinal(login_init_resp: LoginMessage): Promise<boolean> {
+  async loginFinal(login_init_resp: LoginMessage): Promise<AuthIO> {
     const directory = await this.fetchDirectory();
 
     // console .log(`Finalizing OPRF session key`);
@@ -127,17 +239,47 @@ export default class AuthManager extends UserAuthBase {
 
     let login_fini_url = `${this.baseURL}${directory.login_finish}`;
 
-    let final_result = await fetch(login_fini_url, {
+    let final_result: Response = await fetch(login_fini_url, {
       method: "POST",
       mode: "cors",
       cache: "no-cache",
       headers: {
         "Content-Type": "application/json",
+        "Access-Control-Request-Headers": X_AUTHORIZATION_TOKEN,
       },
       body: json_data,
     });
 
-    return final_result.ok;
+    if (final_result.ok) {
+      let lockbox_key: CryptoKey | null = null;
+
+      const auth_token = final_result.headers.get(X_AUTHORIZATION_TOKEN);
+      const resp = await this.parseServerResponse<LoginFinalResp>(final_result);
+
+      assert(auth_token === resp.auth_token);
+
+      if (resp.aux_data && resp.aux_data.length > 0) {
+        lockbox_key = await this.oprfClient.lockbox_key(
+          session_key,
+          this.oprfClientData!.hashed_password
+        );
+      }
+
+      return new AuthIO(resp, lockbox_key);
+    } else {
+      try {
+        this.parseServerResponse(final_result);
+        throw new ValidationError(
+          `Authentication failed with error code: ${final_result.status}`
+        );
+      } catch (e) {
+        throw new AuthenticationFailed(
+          `${e.message}`,
+          login_init_resp.user_info.user_name,
+          login_init_resp.user_info.domain_name
+        );
+      }
+    }
   }
 }
 
@@ -148,7 +290,7 @@ export async function login_user(
   salt: string,
   auth_algo: string,
   access_url: string
-): Promise<boolean> {
+): Promise<AuthIO> {
   const auth_manager = new AuthManager(access_url);
   let user_info: UserAuthInfo = {
     domain_name,

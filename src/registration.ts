@@ -124,6 +124,7 @@ export default class UserRegistrationManager extends UserAuthBase {
     try {
       const response = await fetch(this.discoveryURL, {
         mode: "cors",
+        keepalive: true,
       });
       // console.log(`Server fetch returned code: ${response.status}`);
 
@@ -149,6 +150,7 @@ export default class UserRegistrationManager extends UserAuthBase {
     // console.log(`Attempting to fetch the list of enclaves from ${fetchUrl}!`);
     const response = await fetch(fetchUrl, {
       mode: "cors",
+      keepalive: true,
     });
 
     const resp =
@@ -330,6 +332,7 @@ export default class UserRegistrationManager extends UserAuthBase {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(signed),
+      keepalive: true,
     });
     return this.parseServerResponse<RegInitResp>(registerResult);
   }
@@ -380,6 +383,7 @@ export default class UserRegistrationManager extends UserAuthBase {
         "Content-Type": "application/json",
       },
       body: json_data,
+      keepalive: true,
     });
 
     return this.parseServerResponse<string>(final_result);

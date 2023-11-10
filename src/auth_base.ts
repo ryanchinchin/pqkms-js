@@ -61,7 +61,7 @@ export abstract class UserAuthBase {
     try {
       if (!user_info.salt) {
         user_info.salt = toHexString(
-          window.crypto.getRandomValues(new Uint8Array(32))
+          globalThis.crypto.getRandomValues(new Uint8Array(32))
         );
       }
 
@@ -85,13 +85,11 @@ export abstract class UserAuthBase {
       if (resp.code >= 200 && resp.code < 300) {
         return resp.message;
       } else {
-        throw new Error(
-          `Server returned unexpected response with code: ${resp.code} and message: ${resp.message}`
-        );
+        throw new Error(`${resp.message}`);
       }
     } else {
       const err_resp: PQKMSResponse<string> = await response.json();
-      throw new Error(`Server error: ${err_resp.code} => ${err_resp.message}`);
+      throw new Error(`${JSON.stringify(err_resp)}`);
     }
   }
 
@@ -114,6 +112,7 @@ export abstract class UserAuthBase {
     }
 
     const response = await fetch(user_info_url, {
+      keepalive: true,
       mode: "cors",
       cache: "no-store",
     });

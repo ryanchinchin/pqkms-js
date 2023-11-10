@@ -1,3 +1,13 @@
+export interface AuthenticatedInterface {
+  fetch<T, U>(
+    url: string | URL | Request,
+    method: string,
+    data?: T,
+    headers?: HeadersInit
+  ): Promise<U>;
+  enclaveSigningKey(): Promise<CryptoKey>;
+}
+
 export interface UserProjectsInfo {
   domain_name: string;
   user_name: string;
@@ -21,7 +31,7 @@ export async function register_user(
 export async function login_user(
   pi: UserProjectsInfo,
   raw_passwd: string
-): Promise<boolean> {
+): Promise<AuthenticatedInterface> {
   const login = await import("./login");
   const access_url = `https://${pi.access_url}`;
   return login.login_user(

@@ -120,7 +120,7 @@ export class OprfClient {
     evaluatedElement: Hex,
     clientData: OprfClientInitData
   ): Promise<CryptoKey> {
-    const subtle = window.crypto.subtle;
+    const subtle = globalThis.crypto.subtle;
     let server_point = this.EcGroup.ProjectivePoint.fromHex(evaluatedElement);
 
     server_point.assertValidity();

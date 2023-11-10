@@ -23,6 +23,16 @@
             ],
             "program": "/Users/swami/Downloads/node/node/bin/npx",
             "args": ["tsx", "${workspaceFolder}/tests/compat.test.ts"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "test.login",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "/Users/swami/Downloads/node/node/bin/npx",
+            "args": ["tsx", "${workspaceFolder}/tests/login.test.ts"]
         }
     ]
 }
