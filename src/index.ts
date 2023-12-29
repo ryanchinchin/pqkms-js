@@ -33,7 +33,7 @@ export async function login_user(
   raw_passwd: string
 ): Promise<AuthenticatedInterface> {
   const login = await import("./login");
-  const access_url = `https://${pi.access_url}`;
+  const access_url = `${pi.access_url}`;
   return login.login_user(
     pi.domain_name,
     pi.user_name,

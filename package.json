@@ -6,7 +6,7 @@
   "scripts": {
     "tsc": "tsc",
     "build": "npm install && npm run tsc",
-    "clean" : "rm -rf node_modules lib",
+    "clean": "rm -rf node_modules lib",
     "lint": "npx prettier --check 'src/**/*.{js,ts}'",
     "format": "npx prettier --write 'src/**/*.{js,ts}'",
     "test" : "npx tsx tests/compat.test.ts"
@@ -32,6 +32,6 @@
   "types": "lib/index.d.ts",
   "main": "lib/index.js",
   "dependencies": {
-    "@noble/curves": "^1.2.0"
+    "@noble/curves": "^1.3"
   }
 }

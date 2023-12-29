@@ -144,7 +144,7 @@ export async function pwhash(
     {
       name: "PBKDF2",
       salt,
-      iterations: 1000000,
+      iterations: 600000,
       hash: "SHA-256",
     },
     raw_pwd,

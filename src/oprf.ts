@@ -53,6 +53,19 @@ function toUtf8Bytes(input: UnicodeOrBytes): Uint8Array {
   }
 }
 
+export enum PrfMode {
+  OPRF = 0,
+  VOPRF = 1,
+  POPRF = 2,
+}
+
+function mode2dst(mode: PrfMode): Uint8Array {
+  let result = new Uint8Array(2);
+  result[0] = mode;
+  result[1] = 0x2d;
+  return result;
+}
+
 export class OprfClient {
   readonly EcGroup: CurveFn;
   readonly Fq: FpField;
@@ -92,6 +105,27 @@ export class OprfClient {
     }
   }
 
+  cipersuiteId(): string {
+    const bits = this.EcGroup.CURVE.Fp.BITS;
+    if (bits === 256) {
+      return "P256-SHA256";
+    } else if (bits === 384) {
+      return "P384-SHA384";
+    } else if (bits === 521) {
+      return "P521-SHA512";
+    } else {
+      throw new OprfError("UnknownCurveType" as const);
+    }
+  }
+
+  contextString(mode: PrfMode): UnicodeOrBytes {
+    const bits = this.EcGroup.CURVE.Fp.BITS;
+    let prefix = utf8ToBytes("HashToGroup-OPRFV1-");
+    let mdst = mode2dst(mode);
+    let id = utf8ToBytes(this.cipersuiteId());
+    return concatBytes(prefix, mdst, id);
+  }
+
   blind(hashed_password: UnicodeOrBytes): OprfClientInitData {
     let blinder = this.EcGroup.utils.randomPrivateKey();
     let blinder_int = bytesToNumberBE(blinder);
@@ -100,7 +134,18 @@ export class OprfClient {
       return this.blind(hashed_password);
     }
     let pwd = toUtf8Bytes(hashed_password);
-    let clientRequest = this.hashToCurve(pwd).multiply(blinder_int);
+
+    // Hash to Curve expects a DST as
+    //    HashToGroup-OPRFV1-\x00-P384-SHA384
+
+    const opts = {
+      DST: this.contextString(PrfMode.OPRF),
+    };
+
+    let hashedPoint = this.hashToCurve(pwd, opts);
+    let hp = this.EcGroup.ProjectivePoint.fromAffine(hashedPoint.toAffine());
+
+    let clientRequest = hashedPoint.multiply(blinder_int);
     if (clientRequest.equals(this.EcGroup.ProjectivePoint.ZERO)) {
       throw new OprfError("HashedToInifinity");
     }
@@ -221,7 +266,7 @@ export class OprfClient {
     return crypto.deriveKey(
       {
         name: "HKDF",
-        hash: "SHA-512",
+        hash: "SHA-256",
         salt: salt.buffer,
         info: info.buffer,
       },

@@ -15,7 +15,7 @@ async function validate_login_token(u: UserProjectsInfo, password) {
   const auth_inf: AuthenticatedInterface = await login_user(u, password);
   const enc_signing_key = await auth_inf.enclaveSigningKey();
   const data: Array<UserProjectsInfo> = await auth_inf.fetch(
-    `https://${u.access_url}/v0/admin/user_info?user_name=${u.user_name}`,
+    `${u.access_url}/v0/admin/user_info?user_name=${u.user_name}`,
     "GET"
   );
   console.log(`${JSON.stringify(data)}`);
@@ -39,7 +39,7 @@ async function test_login_valid(
   }
 
   await Promise.all([
-    validate_login_token(users[0], "spyder39"),
+    validate_login_token(users[0], "abcdefg1234"),
     // validate_login_token(users[1], "spyder39"),
     //    validate_login_token(users[2], "spyder39"),
     //    validate_login_token(users[3], "spyder39"),
@@ -48,9 +48,9 @@ async function test_login_valid(
 
 test_login_valid(
   [
-    //    { name: "yogesh.swami@gmail.com", pass: "spyder39" },
-    { name: "axelexic@gmail.com", pass: "spyder39" },
-    { name: "sumanthakur1976@gmail.com", pass: "spyder39" },
+    { name: "yogesh.swami@gmail.com", pass: "abcdefg1234" },
+    //    { name: "axelexic@gmail.com", pass: "spyder39" },
+    //    { name: "sumanthakur1976@gmail.com", pass: "spyder39" },
   ],
   "https://registrar.pqkms.dev:8443"
 );

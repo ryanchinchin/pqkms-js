@@ -11,7 +11,7 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "/Users/swami/Developer/JS/sys/node/bin/npx",
+            "program": "/Users/swami/Downloads/node/node/bin/npx",
             "args": ["tsx", "${workspaceFolder}/src/index.ts"]
         },
         {

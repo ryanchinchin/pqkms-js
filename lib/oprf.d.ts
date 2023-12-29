@@ -17,6 +17,11 @@ export interface OprfClientInitData {
     blinder: bigint;
     clientRequestBytes: string;
 }
+export declare enum PrfMode {
+    OPRF = 0,
+    VOPRF = 1,
+    POPRF = 2
+}
 export declare class OprfClient {
     readonly EcGroup: CurveFn;
     readonly Fq: FpField;
@@ -25,6 +30,8 @@ export declare class OprfClient {
     constructor(ec_group: CurveFn, hashToCurve: HashToCurveFn);
     curveName(): string;
     hashAlgo(): string;
+    cipersuiteId(): string;
+    contextString(mode: PrfMode): UnicodeOrBytes;
     blind(hashed_password: UnicodeOrBytes): OprfClientInitData;
     finalize(evaluatedElement: Hex, clientData: OprfClientInitData): Promise<CryptoKey>;
     login_key(hkdf_key: CryptoKey, hashed_pw: UnicodeOrBytes): Promise<{
